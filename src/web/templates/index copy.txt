@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>ChatGPT Clone</title>
+
+    <style>
+      :root {
+        --bg: #ffffff;
+        --text: #111827;
+        --muted: #6b7280;
+        --border: #e5e7eb;
+        --soft: #f3f4f6;
+        --soft2: #f9fafb;
+        --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+          Arial;
+        background: var(--bg);
+        color: var(--text);
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* Layout */
+      .app {
+        display: flex;
+        height: 100vh;
+      }
+
+      /* ===== Sidebar (como tu captura) ===== */
+      .sidebar{
+        width:290px;
+        background: var(--soft2);
+        border-right: 1px solid var(--border);
+        display:flex;
+        flex-direction:column;
+        padding:10px 10px 12px;
+        gap:8px;
+        overflow: hidden; /* ok */
+      }
+
+      /* ✅ todo el scroll ocurre aquí */
+      .sb-scroll{
+        flex:1;
+        overflow:auto;
+      }
+
+      /* ya no escondemos overflow en secciones */
+      .sb-section{
+        padding: 0 6px;
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+        overflow: visible;
+      }
+
+      /* ✅ listas sin scroll interno */
+      .sb-list{
+        display:flex;
+        flex-direction:column;
+        gap:2px;
+        overflow: visible;
+        padding-right:2px;
+      }
+
+
+      .sb-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 6px 2px;
+      }
+
+      .sb-logo {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: #fff;
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        font-weight: 700;
+      }
+
+      .icon-btn {
+        border: 1px solid var(--border);
+        background: #fff;
+        box-shadow: var(--shadow);
+        border-radius: 10px;
+        padding: 7px 10px;
+        cursor: pointer;
+        color: var(--text);
+        font-size: 12px;
+      }
+      .icon-btn:hover {
+        background: var(--soft);
+      }
+
+      .sb-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 4px 6px;
+      }
+
+      .sb-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 10px;
+        border-radius: 12px;
+        color: var(--text);
+        font-size: 14px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .sb-item:hover {
+        background: var(--soft);
+      }
+
+      .sb-item-btn {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        text-align: left;
+      }
+
+      .sb-ic {
+        width: 18px;
+        display: inline-flex;
+        justify-content: center;
+        opacity: 0.85;
+      }
+
+      .sb-search {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 10px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: #fff;
+        box-shadow: var(--shadow);
+      }
+      .sb-search input {
+        border: 0;
+        outline: 0;
+        width: 100%;
+        background: transparent;
+        color: var(--text);
+        font-size: 14px;
+      }
+
+      .sb-section-title {
+        font-size: 12px;
+        color: var(--muted);
+        padding: 8px 6px 2px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .count-pill {
+        font-size: 11px;
+        padding: 2px 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--muted);
+      }
+
+      /* filas proyectos/chats */
+      .sb-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 10px;
+        border-radius: 12px;
+        cursor: pointer;
+        font-size: 14px;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .sb-row:hover {
+        background: var(--soft);
+      }
+      .sb-row.active {
+        background: #ededed;
+      }
+
+      .sb-row-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* ===== Main chat ===== */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        background: #fff;
+      }
+
+      .topbar {
+        height: 52px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 14px;
+        background: #fff;
+      }
+
+      .chat-title {
+        font-size: 14px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 70vw;
+      }
+
+      .btn {
+        border: 1px solid var(--border);
+        background: #fff;
+        border-radius: 12px;
+        padding: 9px 12px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .btn:hover {
+        background: var(--soft);
+      }
+      .btn.primary {
+        background: #111827;
+        color: #fff;
+        border-color: #111827;
+      }
+      .btn.primary:hover {
+        opacity: 0.92;
+      }
+
+      .chat {
+        flex: 1;
+        overflow: auto;
+        padding: 18px 0 12px;
+        background: #fff;
+      }
+
+      .chat-inner {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 0 16px;
+      }
+
+      /* Mensajes (izq/der) */
+      .msg {
+        display: flex;
+        gap: 12px;
+        padding: 10px 0;
+      }
+      .msg.user {
+        justify-content: flex-end;
+      }
+      .msg.assistant {
+        justify-content: flex-start;
+      }
+
+      .bubble {
+        max-width: 75%;
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        white-space: pre-wrap;
+        line-height: 1.45;
+        font-size: 14px;
+        background: #fff;
+      }
+      .msg.user .bubble {
+        background: var(--soft);
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      /* Composer */
+      .composer {
+        border-top: 1px solid var(--border);
+        padding: 12px 0 16px;
+        background: #fff;
+      }
+      .composer-inner {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 0 16px;
+      }
+      .input-wrap {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 10px 10px 10px 12px;
+        box-shadow: var(--shadow);
+      }
+      textarea {
+        width: 100%;
+        resize: none;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text);
+        font-size: 14px;
+        line-height: 1.35;
+        min-height: 22px;
+        max-height: 180px;
+      }
+      .send {
+        border: 1px solid #111827;
+        background: #111827;
+        color: #fff;
+        cursor: pointer;
+        border-radius: 14px;
+        padding: 10px 12px;
+        font-size: 13px;
+        min-width: 76px;
+      }
+      .send:hover {
+        opacity: 0.92;
+      }
+
+      .hint {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      /* ===== Modal ===== */
+      .hidden {
+        display: none !important;
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.25);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      .modal {
+        width: 420px;
+        max-width: 95vw;
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+        overflow: hidden;
+      }
+      .modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 14px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      .modal-title {
+        font-weight: 700;
+        font-size: 14px;
+      }
+      .modal-body {
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .modal-label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .modal-input {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-size: 14px;
+        outline: none;
+      }
+      .modal-input:focus {
+        border-color: #c7c7c7;
+      }
+
+      .modal-error {
+        font-size: 12px;
+        color: #b91c1c;
+      }
+
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 12px 14px 14px;
+        border-top: 1px solid var(--border);
+      }
+
+      @media (max-width: 720px) {
+        .sidebar {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+      <div class="sb-top">
+        <div class="sb-logo" title="ChatGPT Clone">gpt</div>
+        <button class="icon-btn" id="collapseBtn" title="Contraer">▢</button>
+      </div>
+
+      <div class="sb-scroll">
+        <nav class="sb-nav">
+          <button class="sb-item sb-item-btn" id="newChatBtn">
+            <span class="sb-ic">+</span>
+            <span>Nuevo chat</span>
+          </button>
+
+          <div class="sb-search">
+            <span class="sb-ic">⌕</span>
+            <input id="searchChats" type="text" placeholder="Buscar chats" />
+          </div>
+        </nav>
+
+        <div class="sb-section">
+          <div class="sb-section-title">
+            <span>Proyectos</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span class="count-pill" id="projectCount">0</span>
+              <button class="icon-btn" id="editProjectContextBtn" title="Editar contexto">✎</button>
+            </div>
+          </div>
+
+          <button class="sb-item sb-item-btn" id="newProjectBtn">
+            <span class="sb-ic">＋</span>
+            <span>Nuevo proyecto</span>
+          </button>
+
+          <!-- SIN max-height -->
+          <div class="sb-list" id="projectsList"></div>
+
+          <div class="sb-section-title" style="margin-top:10px;">
+            <span>Tus chats</span>
+            <span class="count-pill" id="chatCount">0</span>
+          </div>
+
+          <!-- SIN max-height -->
+          <div class="sb-list" id="chatsList"></div>
+        </div>
+      </div>
+    </aside>
+
+
+    <!-- Modal -->
+    <div class="modal-backdrop hidden" id="modalBackdrop">
+      <div
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modalTitle"
+      >
+        <div class="modal-head">
+          <div class="modal-title" id="modalTitle">Título</div>
+          <button class="icon-btn" id="modalClose" title="Cerrar">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <label class="modal-label" id="modalLabel" for="modalInput"
+            >Nombre</label
+          >
+          <textarea
+            class="modal-input"
+            id="modalInput"
+            placeholder="Escribe aquí…"
+            style="min-height: 110px; resize: vertical"
+          ></textarea>
+          <div class="modal-error hidden" id="modalError"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" id="modalCancel">Cancelar</button>
+          <button class="btn primary" id="modalOk">Aceptar</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // -------------------------
+      // DOM
+      // -------------------------
+      const projectsList = document.getElementById("projectsList");
+      const chatsList = document.getElementById("chatsList");
+      const chatInner = document.getElementById("chatInner");
+      const chatScroll = document.getElementById("chatScroll");
+      const input = document.getElementById("input");
+      const sendBtn = document.getElementById("sendBtn");
+      const newProjectBtn = document.getElementById("newProjectBtn");
+      const newChatBtn = document.getElementById("newChatBtn");
+      const renameChatBtn = document.getElementById("renameChatBtn");
+      const topTitle = document.getElementById("topTitle");
+      const statusEl = document.getElementById("status");
+      const projectCount = document.getElementById("projectCount");
+      const chatCount = document.getElementById("chatCount");
+      const searchChats = document.getElementById("searchChats");
+
+      // Modal DOM
+      const modalBackdrop = document.getElementById("modalBackdrop");
+      const modalTitle = document.getElementById("modalTitle");
+      const modalLabel = document.getElementById("modalLabel");
+      const modalInput = document.getElementById("modalInput");
+      const modalError = document.getElementById("modalError");
+      const modalOk = document.getElementById("modalOk");
+      const modalCancel = document.getElementById("modalCancel");
+      const modalClose = document.getElementById("modalClose");
+
+      const editProjectContextBtn = document.getElementById(
+        "editProjectContextBtn"
+      );
+
+      // -------------------------
+      // State
+      // -------------------------
+      let projects = [];
+      let chats = [];
+      let selectedProjectId = null;
+      let selectedChatId = null;
+      let modalOnConfirm = null;
+
+      function setStatus(t) {
+        statusEl.textContent = t;
+      }
+
+      // -------------------------
+      // Utils
+      // -------------------------
+      function escapeHtml(s) {
+        return (s ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
+      }
+
+      function autoResize() {
+        input.style.height = "auto";
+        input.style.height = Math.min(input.scrollHeight, 180) + "px";
+      }
+
+      // -------------------------
+      // Modal
+      // -------------------------
+      function openModal({
+        title,
+        label,
+        placeholder,
+        okText,
+        defaultValue,
+        onConfirm,
+      }) {
+        modalTitle.textContent = title || "Acción";
+        modalLabel.textContent = label || "Nombre";
+        modalInput.placeholder = placeholder || "";
+        modalInput.value = defaultValue || "";
+        modalOk.textContent = okText || "Aceptar";
+
+        modalError.textContent = "";
+        modalError.classList.add("hidden");
+
+        modalOnConfirm = onConfirm;
+        modalBackdrop.classList.remove("hidden");
+        setTimeout(() => modalInput.focus(), 0);
+      }
+
+      function closeModal() {
+        modalBackdrop.classList.add("hidden");
+        modalOnConfirm = null;
+      }
+
+      function showModalError(msg) {
+        modalError.textContent = msg;
+        modalError.classList.remove("hidden");
+      }
+
+      async function loadProject(projectId) {
+        const data = await apiGet(`/api/projects/${projectId}`);
+        return data.project;
+      }
+
+      modalCancel.onclick = closeModal;
+      modalClose.onclick = closeModal;
+      modalBackdrop.addEventListener("click", (e) => {
+        if (e.target === modalBackdrop) closeModal();
+      });
+      modalInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") modalOk.click();
+        if (e.key === "Escape") closeModal();
+      });
+
+      modalOk.onclick = async () => {
+        const value = (modalInput.value || "").trim();
+        if (!value) return showModalError("Este campo no puede estar vacío.");
+        if (typeof modalOnConfirm === "function") await modalOnConfirm(value);
+      };
+
+      editProjectContextBtn.onclick = async () => {
+        if (!selectedProjectId) {
+          alert("Selecciona un proyecto.");
+          return;
+        }
+
+        try {
+          setStatus("Cargando proyecto…");
+          const proj = await loadProject(selectedProjectId);
+
+          openModal({
+            title: `Contexto del proyecto: ${proj.name}`,
+            label: "Instrucciones / memoria del proyecto",
+            placeholder:
+              "Ej: Este proyecto es para un clon de ChatGPT. Responde siempre en español. Prioriza FastAPI…",
+            okText: "Guardar",
+            defaultValue: proj.context || "",
+            onConfirm: async (contextText) => {
+              try {
+                setStatus("Guardando contexto…");
+                await apiPatch(`/api/projects/${selectedProjectId}`, {
+                  context: contextText,
+                });
+                setStatus("Listo");
+                closeModal();
+              } catch (e) {
+                setStatus("Error");
+                showModalError(e.message || "No se pudo guardar.");
+              }
+            },
+          });
+
+          setStatus("Listo");
+        } catch (e) {
+          setStatus("Error");
+          alert(e.message);
+        }
+      };
+
+      // -------------------------
+      // API
+      // -------------------------
+      async function apiGet(url) {
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Error");
+        return data;
+      }
+      async function apiPost(url, body) {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Error");
+        return data;
+      }
+      async function apiPatch(url, body) {
+        const res = await fetch(url, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Error");
+        return data;
+      }
+
+      // -------------------------
+      // Render
+      // -------------------------
+      function renderProjects() {
+        projectsList.innerHTML = "";
+        projectCount.textContent = projects.length;
+
+        projects.forEach((p) => {
+          const row = document.createElement("div");
+          row.className =
+            "sb-row" + (p.id === selectedProjectId ? " active" : "");
+          row.innerHTML = `<div class="sb-row-title" title="${escapeHtml(
+            p.name
+          )}">${escapeHtml(p.name)}</div>`;
+
+          row.onclick = async () => {
+            selectedProjectId = p.id;
+            selectedChatId = null;
+            topTitle.textContent = "Selecciona un chat";
+            renderProjects();
+            await loadChats();
+            clearChatView();
+          };
+          projectsList.appendChild(row);
+        });
+      }
+
+      function renderChats(list = chats) {
+        chatsList.innerHTML = "";
+        chatCount.textContent = chats.length;
+
+        list.forEach((c) => {
+          const row = document.createElement("div");
+          row.className = "sb-row" + (c.id === selectedChatId ? " active" : "");
+          row.innerHTML = `<div class="sb-row-title" title="${escapeHtml(
+            c.title
+          )}">${escapeHtml(c.title)}</div>`;
+          row.onclick = async () => {
+            selectedChatId = c.id;
+            topTitle.textContent = c.title;
+            renderChats();
+            await loadMessages();
+          };
+          chatsList.appendChild(row);
+        });
+      }
+
+      function clearChatView() {
+        chatInner.innerHTML = `
+        <div class="msg assistant">
+          <div class="bubble muted">Selecciona un chat para ver el historial.</div>
+        </div>
+      `;
+      }
+
+      function addMessage(role, text) {
+        const row = document.createElement("div");
+        row.className = `msg ${role === "user" ? "user" : "assistant"}`;
+        row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+        chatInner.appendChild(row);
+        chatScroll.scrollTop = chatScroll.scrollHeight;
+      }
+
+      // -------------------------
+      // Data loading
+      // -------------------------
+      async function loadProjects() {
+        const data = await apiGet("/api/projects");
+        projects = data.projects || [];
+        if (!selectedProjectId && projects.length)
+          selectedProjectId = projects[0].id;
+        renderProjects();
+      }
+
+      async function loadChats() {
+        if (!selectedProjectId) {
+          chats = [];
+          renderChats();
+          return;
+        }
+        const data = await apiGet(`/api/projects/${selectedProjectId}/chats`);
+        chats = data.chats || [];
+        renderChats();
+
+        if (!selectedChatId && chats.length) {
+          selectedChatId = chats[0].id;
+          topTitle.textContent = chats[0].title;
+          renderChats();
+          await loadMessages();
+        }
+      }
+
+      async function loadMessages() {
+        if (!selectedChatId) return clearChatView();
+
+        const data = await apiGet(`/api/chats/${selectedChatId}/messages`);
+        const msgs = data.messages || [];
+        topTitle.textContent = data.chat?.title || "Chat";
+
+        chatInner.innerHTML = "";
+        if (msgs.length === 0) {
+          chatInner.innerHTML = `
+          <div class="msg assistant">
+            <div class="bubble muted">Este chat está vacío. Escribe un mensaje abajo.</div>
+          </div>
+        `;
+        } else {
+          msgs.forEach((m) => addMessage(m.role, m.content));
+        }
+        chatScroll.scrollTop = chatScroll.scrollHeight;
+      }
+
+      // -------------------------
+      // Actions
+      // -------------------------
+      newProjectBtn.onclick = () => {
+        openModal({
+          title: "Nuevo proyecto",
+          label: "Nombre del proyecto",
+          placeholder: "Ej: piloto",
+          okText: "Crear",
+          defaultValue: "",
+          onConfirm: async (name) => {
+            try {
+              setStatus("Creando proyecto…");
+              await apiPost("/api/projects", { name });
+              await loadProjects();
+              selectedProjectId = projects[0]?.id || selectedProjectId;
+              selectedChatId = null;
+              await loadChats();
+              clearChatView();
+              setStatus("Listo");
+              closeModal();
+            } catch (e) {
+              setStatus("Error");
+              showModalError(e.message || "No se pudo crear el proyecto.");
+            }
+          },
+        });
+      };
+
+      newChatBtn.onclick = async () => {
+        if (!selectedProjectId) return;
+
+        try {
+          setStatus("Creando chat…");
+          const data = await apiPost(
+            `/api/projects/${selectedProjectId}/chats`,
+            { title: "New chat" }
+          );
+          await loadChats();
+          selectedChatId = data.chat.id;
+          await loadMessages();
+          setStatus("Listo");
+        } catch (e) {
+          setStatus("Error");
+          alert(e.message);
+        }
+      };
+
+      renameChatBtn.onclick = () => {
+        if (!selectedChatId) return;
+
+        const current = topTitle.textContent || "Chat";
+        openModal({
+          title: "Renombrar chat",
+          label: "Nuevo nombre",
+          placeholder: "Nombre del chat",
+          okText: "Guardar",
+          defaultValue: current,
+          onConfirm: async (title) => {
+            try {
+              setStatus("Renombrando…");
+              await apiPatch(`/api/chats/${selectedChatId}`, { title });
+              await loadChats();
+              await loadMessages();
+              setStatus("Listo");
+              closeModal();
+            } catch (e) {
+              setStatus("Error");
+              showModalError(e.message || "No se pudo renombrar.");
+            }
+          },
+        });
+      };
+
+      async function sendMessage() {
+        const text = input.value.trim();
+        if (!text || !selectedChatId) return;
+
+        addMessage("user", text);
+        input.value = "";
+        autoResize();
+        setStatus("Pensando…");
+
+        const typing = document.createElement("div");
+        typing.className = "msg assistant";
+        typing.innerHTML = `<div class="bubble muted">...</div>`;
+        chatInner.appendChild(typing);
+        chatScroll.scrollTop = chatScroll.scrollHeight;
+
+        try {
+          const data = await apiPost("/api/send", {
+            chat_id: selectedChatId,
+            message: text,
+          });
+          typing.remove();
+          addMessage("assistant", data.reply);
+          setStatus("Listo");
+          await loadChats(); // por si auto-título cambió
+          const currentChat = chats.find((c) => c.id === selectedChatId);
+          if (currentChat) topTitle.textContent = currentChat.title;
+        } catch (e) {
+          typing.remove();
+          addMessage("assistant", "Error: " + e.message);
+          setStatus("Error");
+        }
+      }
+
+      sendBtn.onclick = sendMessage;
+      input.addEventListener("input", autoResize);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+
+      // Buscar chats (filtra en el frontend)
+      searchChats.addEventListener("input", () => {
+        const q = (searchChats.value || "").toLowerCase().trim();
+        if (!q) return renderChats();
+        const filtered = chats.filter((c) =>
+          (c.title || "").toLowerCase().includes(q)
+        );
+        renderChats(filtered);
+      });
+
+      // Init
+      (async function init() {
+        try {
+          setStatus("Cargando…");
+          autoResize();
+          await loadProjects();
+          await loadChats();
+          setStatus("Listo");
+          input.focus();
+        } catch (e) {
+          setStatus("Error");
+          alert(e.message);
+        }
+      })();
+    </script>
+  </body>
+</html>
