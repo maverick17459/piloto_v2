@@ -1,0 +1,199 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "Command Execution API",
+        "description": "API para ejecutar comandos permitidos. Swagger: /docs",
+        "version": "1.0.0"
+    },
+    "paths": {
+        "/health": {
+            "get": {
+                "tags": [
+                    "commands"
+                ],
+                "summary": "Health",
+                "operationId": "health_health_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/command": {
+            "post": {
+                "tags": [
+                    "commands"
+                ],
+                "summary": "Execute Command",
+                "operationId": "execute_command_command_post",
+                "parameters": [
+                    {
+                        "name": "X-API-Key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CommandRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CommandResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "CommandRequest": {
+                "properties": {
+                    "cmd": {
+                        "type": "string",
+                        "title": "Cmd",
+                        "examples": [
+                            "whoami",
+                            "dir C:\\",
+                            "git status"
+                        ]
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "cmd"
+                ],
+                "title": "CommandRequest",
+                "description": "Petición: línea de comando completa (puede incluir espacios).\nEjemplos: \"whoami\", \"dir C:\\\", \"git status\""
+            },
+            "CommandResponse": {
+                "properties": {
+                    "cmd": {
+                        "type": "string",
+                        "title": "Cmd"
+                    },
+                    "status": {
+                        "type": "string",
+                        "title": "Status",
+                        "examples": [
+                            "ok",
+                            "error"
+                        ]
+                    },
+                    "stdout": {
+                        "type": "string",
+                        "title": "Stdout",
+                        "default": ""
+                    },
+                    "exit_code": {
+                        "type": "integer",
+                        "title": "Exit Code",
+                        "default": 0
+                    },
+                    "duration_ms": {
+                        "type": "integer",
+                        "title": "Duration Ms",
+                        "default": 0
+                    },
+                    "truncated": {
+                        "type": "boolean",
+                        "title": "Truncated",
+                        "default": false
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "cmd",
+                    "status"
+                ],
+                "title": "CommandResponse"
+            },
+            "HTTPValidationError": {
+                "properties": {
+                    "detail": {
+                        "items": {
+                            "$ref": "#/components/schemas/ValidationError"
+                        },
+                        "type": "array",
+                        "title": "Detail"
+                    }
+                },
+                "type": "object",
+                "title": "HTTPValidationError"
+            },
+            "ValidationError": {
+                "properties": {
+                    "loc": {
+                        "items": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "type": "array",
+                        "title": "Location"
+                    },
+                    "msg": {
+                        "type": "string",
+                        "title": "Message"
+                    },
+                    "type": {
+                        "type": "string",
+                        "title": "Error Type"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "loc",
+                    "msg",
+                    "type"
+                ],
+                "title": "ValidationError"
+            }
+        }
+    }
+}

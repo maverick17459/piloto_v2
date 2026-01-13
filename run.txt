@@ -1,0 +1,3 @@
+
+comdo para ejecucion: 
+    python -m uvicorn src.main:app --reload

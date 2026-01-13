@@ -1,0 +1,101 @@
+2026-01-13 19:06:14 INFO trace_id=- event=prompt_logger.initialized path=logs\piloto_prompts.log
+2026-01-13 19:06:15 INFO trace_id=- event=prompt_logger.initialized path=logs\piloto_prompts.log
+2026-01-13 19:06:17 INFO trace_id=- event=prompt_logger.initialized path=logs\piloto_prompts.log
+2026-01-13 19:06:53 INFO trace_id=- event=prompt_logger.initialized path=logs\piloto_prompts.log
+2026-01-13 19:15:50 INFO trace_id=- event=prompt_logger.initialized path=logs\piloto_prompts.log
+2026-01-13 19:15:52 INFO trace_id=- event=prompt_logger.initialized path=logs\piloto_prompts.log
+2026-01-13 19:15:53 INFO trace_id=- event=prompt_logger.initialized path=logs\piloto_prompts.log
+2026-01-13 19:15:55 INFO trace_id=- event=prompt_logger.initialized path=logs\piloto_prompts.log
+2026-01-13 19:15:56 INFO trace_id=- event=prompt_logger.initialized path=logs\piloto_prompts.log
+2026-01-13 19:35:20 INFO trace_id=- event=prompt_logger.initialized path=logs\piloto_prompts.log
+2026-01-13 19:35:29 INFO trace_id=46a06e8f463841149bc2c2e6924d2b6a request.start method=GET path=/
+2026-01-13 19:35:29 INFO trace_id=46a06e8f463841149bc2c2e6924d2b6a request.end status=200 duration_ms=38
+2026-01-13 19:35:29 INFO trace_id=40a6a42e47544ee1b55538cb26c7766c request.start method=GET path=/api/projects
+2026-01-13 19:35:29 INFO trace_id=40a6a42e47544ee1b55538cb26c7766c request.end status=200 duration_ms=2
+2026-01-13 19:35:29 INFO trace_id=f3a9a117081f4b56812c7656af17740e request.start method=GET path=/api/projects/f30bdb52b51648d19f3f08cac542367e/chats
+2026-01-13 19:35:29 INFO trace_id=f3a9a117081f4b56812c7656af17740e request.end status=200 duration_ms=1
+2026-01-13 19:35:29 INFO trace_id=85692b8f4851420e9012a8655ef2c36b request.start method=GET path=/api/chats/8dfe108babe94952ae98c645b3e8627d/messages
+2026-01-13 19:35:29 INFO trace_id=85692b8f4851420e9012a8655ef2c36b request.end status=200 duration_ms=1
+2026-01-13 19:35:37 INFO trace_id=6fccf2c871e14be3a4d6af4062f1e81e request.start method=POST path=/api/projects
+2026-01-13 19:35:37 INFO trace_id=6fccf2c871e14be3a4d6af4062f1e81e request.end status=200 duration_ms=3
+2026-01-13 19:35:37 INFO trace_id=29900399e6294b9c9c6c31c07140287a request.start method=GET path=/api/projects
+2026-01-13 19:35:37 INFO trace_id=29900399e6294b9c9c6c31c07140287a request.end status=200 duration_ms=1
+2026-01-13 19:35:37 INFO trace_id=ff5ff29c0560414d819adf8241d6577c request.start method=GET path=/api/projects/cbf936bd13bf4db5885e0092687a8bca/chats
+2026-01-13 19:35:37 INFO trace_id=ff5ff29c0560414d819adf8241d6577c request.end status=200 duration_ms=0
+2026-01-13 19:35:37 INFO trace_id=96167bdadd97412e87fb734a8ac321c1 request.start method=GET path=/api/chats/27a5fab55c6e4fd280c5dde3eb17eb1d/messages
+2026-01-13 19:35:37 INFO trace_id=96167bdadd97412e87fb734a8ac321c1 request.end status=200 duration_ms=1
+2026-01-13 19:35:45 INFO trace_id=6b0e9da1d94c4dc9b94c04261a88f510 request.start method=GET path=/api/chats/27a5fab55c6e4fd280c5dde3eb17eb1d/messages
+2026-01-13 19:35:45 INFO trace_id=6b0e9da1d94c4dc9b94c04261a88f510 request.end status=200 duration_ms=0
+2026-01-13 19:35:48 INFO trace_id=b10ff0a3602c43f98e8ce57c0b004b12 request.start method=GET path=/api/projects/cbf936bd13bf4db5885e0092687a8bca/chats
+2026-01-13 19:35:48 INFO trace_id=b10ff0a3602c43f98e8ce57c0b004b12 request.end status=200 duration_ms=0
+2026-01-13 19:35:48 INFO trace_id=69c9d221bc6947c48a5076d6a6eaeccf request.start method=GET path=/api/chats/27a5fab55c6e4fd280c5dde3eb17eb1d/messages
+2026-01-13 19:35:48 INFO trace_id=69c9d221bc6947c48a5076d6a6eaeccf request.end status=200 duration_ms=0
+2026-01-13 19:35:52 INFO trace_id=af0da34e739045bb9d6ada10512c19d8 request.start method=GET path=/api/projects/cbf936bd13bf4db5885e0092687a8bca/chats
+2026-01-13 19:35:52 INFO trace_id=af0da34e739045bb9d6ada10512c19d8 request.end status=200 duration_ms=1
+2026-01-13 19:35:52 INFO trace_id=c7e73229392a44c0a5ec1f22e1f34a55 request.start method=GET path=/api/chats/27a5fab55c6e4fd280c5dde3eb17eb1d/messages
+2026-01-13 19:35:52 INFO trace_id=c7e73229392a44c0a5ec1f22e1f34a55 request.end status=200 duration_ms=0
+2026-01-13 19:35:55 INFO trace_id=eeecd6f8466f4c6ab49cabf146b5aca6 request.start method=GET path=/api/projects/cbf936bd13bf4db5885e0092687a8bca
+2026-01-13 19:35:55 INFO trace_id=eeecd6f8466f4c6ab49cabf146b5aca6 request.end status=200 duration_ms=2
+2026-01-13 19:47:27 INFO trace_id=- event=prompt_logger.initialized path=logs\piloto_prompts.log
+2026-01-13 19:48:06 INFO trace_id=8477b4cb730c4035b8383c82f3c751fd request.start method=GET path=/
+2026-01-13 19:48:06 INFO trace_id=8477b4cb730c4035b8383c82f3c751fd request.end status=200 duration_ms=40
+2026-01-13 19:48:06 INFO trace_id=1a9f3e608030477ca4d729f53e69621d request.start method=GET path=/api/projects
+2026-01-13 19:48:06 INFO trace_id=1a9f3e608030477ca4d729f53e69621d request.end status=200 duration_ms=0
+2026-01-13 19:48:06 INFO trace_id=91e9a6faf37f4b279ec6ef3e8b7ebc1b request.start method=GET path=/api/projects/4c912a8c9f4146e59fcc481fcdcfcaeb/chats
+2026-01-13 19:48:06 INFO trace_id=91e9a6faf37f4b279ec6ef3e8b7ebc1b request.end status=200 duration_ms=0
+2026-01-13 19:48:06 INFO trace_id=b824045c8ae74522bb740eed80846931 request.start method=GET path=/api/chats/8137308f897147968e1d87d0ad869a43/messages
+2026-01-13 19:48:06 INFO trace_id=b824045c8ae74522bb740eed80846931 request.end status=200 duration_ms=1
+2026-01-13 19:48:10 INFO trace_id=04d3662c555e440584df8595d8908110 request.start method=POST path=/api/projects
+2026-01-13 19:48:10 INFO trace_id=04d3662c555e440584df8595d8908110 request.end status=200 duration_ms=2
+2026-01-13 19:48:10 INFO trace_id=5c0b703c8d1841b88bde323594f4783b request.start method=GET path=/api/projects
+2026-01-13 19:48:10 INFO trace_id=5c0b703c8d1841b88bde323594f4783b request.end status=200 duration_ms=0
+2026-01-13 19:48:10 INFO trace_id=0f6b34d3a24d451288176da6bf5f5ef6 request.start method=GET path=/api/projects/ecae9e998b6e423c9f1faaf78b3db3b2/chats
+2026-01-13 19:48:10 INFO trace_id=0f6b34d3a24d451288176da6bf5f5ef6 request.end status=200 duration_ms=1
+2026-01-13 19:48:10 INFO trace_id=07275cbcceb34ad1b4a78bf4b3e42265 request.start method=GET path=/api/chats/dc078f13dfec45d4b6c1331178b624e2/messages
+2026-01-13 19:48:10 INFO trace_id=07275cbcceb34ad1b4a78bf4b3e42265 request.end status=200 duration_ms=0
+2026-01-13 19:48:15 INFO trace_id=4276d2254c8a4eb9bdda18489dbb678c request.start method=GET path=/api/projects/ecae9e998b6e423c9f1faaf78b3db3b2/chats
+2026-01-13 19:48:15 INFO trace_id=4276d2254c8a4eb9bdda18489dbb678c request.end status=200 duration_ms=1
+2026-01-13 19:48:15 INFO trace_id=0a9e62cea4f34cf0ae69ae15b58179e7 request.start method=GET path=/api/chats/dc078f13dfec45d4b6c1331178b624e2/messages
+2026-01-13 19:48:15 INFO trace_id=0a9e62cea4f34cf0ae69ae15b58179e7 request.end status=200 duration_ms=1
+2026-01-13 19:48:19 INFO trace_id=b670131b00d244568bea55411ace5b18 request.start method=GET path=/api/projects/4c912a8c9f4146e59fcc481fcdcfcaeb/chats
+2026-01-13 19:48:19 INFO trace_id=b670131b00d244568bea55411ace5b18 request.end status=200 duration_ms=1
+2026-01-13 19:48:19 INFO trace_id=1778e61c0af14c0e82d4dffa03fbce84 request.start method=GET path=/api/chats/8137308f897147968e1d87d0ad869a43/messages
+2026-01-13 19:48:19 INFO trace_id=1778e61c0af14c0e82d4dffa03fbce84 request.end status=200 duration_ms=0
+2026-01-13 19:48:20 INFO trace_id=31bfd8a518b24d79ba0068a38a95992f request.start method=GET path=/api/projects/4c912a8c9f4146e59fcc481fcdcfcaeb/chats
+2026-01-13 19:48:20 INFO trace_id=31bfd8a518b24d79ba0068a38a95992f request.end status=200 duration_ms=0
+2026-01-13 19:48:20 INFO trace_id=eda67655cea24b5a937a8e1fe0a1353c request.start method=GET path=/api/chats/8137308f897147968e1d87d0ad869a43/messages
+2026-01-13 19:48:20 INFO trace_id=eda67655cea24b5a937a8e1fe0a1353c request.end status=200 duration_ms=0
+2026-01-13 19:48:24 INFO trace_id=6acb6dd4f2054b05b7a8950ac516365d request.start method=GET path=/api/projects/4c912a8c9f4146e59fcc481fcdcfcaeb
+2026-01-13 19:48:24 INFO trace_id=6acb6dd4f2054b05b7a8950ac516365d request.end status=200 duration_ms=1
+2026-01-13 19:48:49 INFO trace_id=d5b03fc9fcd44f52a51ac4d45d69ec7b request.start method=GET path=/
+2026-01-13 19:48:49 INFO trace_id=d5b03fc9fcd44f52a51ac4d45d69ec7b request.end status=200 duration_ms=1
+2026-01-13 19:48:49 INFO trace_id=cd67f766683c4765b627e574d725a2d2 request.start method=GET path=/api/projects
+2026-01-13 19:48:49 INFO trace_id=cd67f766683c4765b627e574d725a2d2 request.end status=200 duration_ms=0
+2026-01-13 19:48:49 INFO trace_id=f9c0daca97b24e9b9b01bca5876cd1cc request.start method=GET path=/api/projects/ecae9e998b6e423c9f1faaf78b3db3b2/chats
+2026-01-13 19:48:49 INFO trace_id=f9c0daca97b24e9b9b01bca5876cd1cc request.end status=200 duration_ms=1
+2026-01-13 19:48:49 INFO trace_id=dfcb9d7f9b8b45e48e53ad625e302209 request.start method=GET path=/api/chats/dc078f13dfec45d4b6c1331178b624e2/messages
+2026-01-13 19:48:49 INFO trace_id=dfcb9d7f9b8b45e48e53ad625e302209 request.end status=200 duration_ms=1
+2026-01-13 19:49:32 INFO trace_id=0ca85463e8c34ee5ab990b6fa6b89593 request.start method=GET path=/
+2026-01-13 19:49:32 INFO trace_id=0ca85463e8c34ee5ab990b6fa6b89593 request.end status=200 duration_ms=33
+2026-01-13 19:49:32 INFO trace_id=7d8d72f51cdb4eec8e2f3e4a09ad5c29 request.start method=GET path=/api/projects
+2026-01-13 19:49:32 INFO trace_id=7d8d72f51cdb4eec8e2f3e4a09ad5c29 request.end status=200 duration_ms=1
+2026-01-13 19:49:32 INFO trace_id=6dc7ccc6bb4d4e2ba1bff96adb5d2c57 request.start method=GET path=/api/projects/ecae9e998b6e423c9f1faaf78b3db3b2/chats
+2026-01-13 19:49:32 INFO trace_id=6dc7ccc6bb4d4e2ba1bff96adb5d2c57 request.end status=200 duration_ms=1
+2026-01-13 19:49:32 INFO trace_id=b810496a4dcc4633b48269baad5537ae request.start method=GET path=/api/chats/dc078f13dfec45d4b6c1331178b624e2/messages
+2026-01-13 19:49:32 INFO trace_id=b810496a4dcc4633b48269baad5537ae request.end status=200 duration_ms=0
+2026-01-13 19:49:32 INFO trace_id=d4bf5ce4fb274d338ea9ff08614c6da2 request.start method=GET path=/api/mcps
+2026-01-13 19:49:32 INFO trace_id=d4bf5ce4fb274d338ea9ff08614c6da2 request.end status=200 duration_ms=0
+2026-01-13 19:49:33 INFO trace_id=892aa8d4719346248e8b87631994e90e request.start method=GET path=/api/projects/ecae9e998b6e423c9f1faaf78b3db3b2
+2026-01-13 19:49:33 INFO trace_id=892aa8d4719346248e8b87631994e90e request.end status=200 duration_ms=1
+2026-01-13 19:49:33 INFO trace_id=43c096ada3994bb7bd71d01fb48cde1f request.start method=GET path=/api/mcps
+2026-01-13 19:49:33 INFO trace_id=43c096ada3994bb7bd71d01fb48cde1f request.end status=200 duration_ms=1
+2026-01-13 19:57:43 INFO trace_id=e46861e921e340359b003f006d22bde4 request.start method=GET path=/api/projects/ecae9e998b6e423c9f1faaf78b3db3b2/chats
+2026-01-13 19:57:43 INFO trace_id=e46861e921e340359b003f006d22bde4 request.end status=200 duration_ms=0
+2026-01-13 19:57:43 INFO trace_id=e574617ec7d44676b3951ef939ec8751 request.start method=GET path=/api/chats/dc078f13dfec45d4b6c1331178b624e2/messages
+2026-01-13 19:57:43 INFO trace_id=e574617ec7d44676b3951ef939ec8751 request.end status=200 duration_ms=1
+2026-01-13 19:57:44 INFO trace_id=adc0773fa9454fd0a0e5a257c30f7ba3 request.start method=GET path=/api/chats/dc078f13dfec45d4b6c1331178b624e2/messages
+2026-01-13 19:57:44 INFO trace_id=adc0773fa9454fd0a0e5a257c30f7ba3 request.end status=200 duration_ms=1
+2026-01-13 19:58:02 INFO trace_id=394ef30d49c444dfa99c37856b4ef0cd request.start method=GET path=/api/projects/ecae9e998b6e423c9f1faaf78b3db3b2
+2026-01-13 19:58:02 INFO trace_id=394ef30d49c444dfa99c37856b4ef0cd request.end status=200 duration_ms=0
+2026-01-13 19:58:02 INFO trace_id=d4a7c81ed3354a5c8c31c7c5f0503060 request.start method=GET path=/api/mcps
+2026-01-13 19:58:02 INFO trace_id=d4a7c81ed3354a5c8c31c7c5f0503060 request.end status=200 duration_ms=0

@@ -3,8 +3,6 @@ import json
 import time
 import os
 import asyncio
-from typing import Optional, List, Any, Dict
-
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -16,11 +14,13 @@ from src.chat.store import MemoryStore
 from src.chat.prompts import DEFAULT_SYSTEM_PROMPT
 
 from src.mcp.invoke_sync import invoke_mcp_sync, MCPCall, MCPInvokeError
-from src.mcp.store import MCPStore
-from src.mcp.service import MCPService
 
 from src.agent.plan_run_store import PlanRunStore
 from src.agent.plan_background_runner import run_plan_in_background
+
+
+
+
 
 from src.observability.logger import get_logger, get_prompt_logger, prompts_enabled
 from src.observability.prompt_debug import (
@@ -29,20 +29,32 @@ from src.observability.prompt_debug import (
     serialize_text_for_promptlog,
 )
 
+
+# ---- añadir imports arriba del archivo ----
+from typing import Optional, List, Any, Dict
+
+
+
+from src.mcp.store import MCPStore
+from src.mcp.service import MCPService
+
 router = APIRouter()
 templates = Jinja2Templates(directory="src/web/templates")
 
 settings = get_settings()
 client = OpenAIChatClient(api_key=settings.api_key, model=settings.model)
 
+# Store en memoria (RAM). Se reinicia al reiniciar el server.
 store = MemoryStore(base_system_prompt=DEFAULT_SYSTEM_PROMPT)
 
+# ----  ----
 mcp_store = MCPStore()
 mcp_service = MCPService(mcp_store)
 
-plan_run_store = PlanRunStore()
-
 SESSION_COOKIE_NAME = "chat_session_id"
+
+
+plan_run_store = PlanRunStore()
 
 
 # ---------------- Schemas ----------------
@@ -50,17 +62,19 @@ SESSION_COOKIE_NAME = "chat_session_id"
 class CreateProjectIn(BaseModel):
     name: str
     context: str | None = None
-    mcp_ids: list[str] | None = None
+    mcp_ids: list[str] | None = None  # NUEVO
 
 
 class UpdateProjectIn(BaseModel):
     name: str | None = None
     context: str | None = None
-    mcp_ids: list[str] | None = None
+    mcp_ids: list[str] | None = None  # NUEVO
 
 
 class CreateChatIn(BaseModel):
     title: str | None = None
+
+    
 
 
 class RenameChatIn(BaseModel):
@@ -71,14 +85,13 @@ class SendMessageIn(BaseModel):
     chat_id: str
     message: str
 
-
 # ---------------- MCP Schemas ----------------
 
 class MCPRegisterIn(BaseModel):
-    address: str
+    address: str  # "192.168.1.50:9090" o "http://..."
     name: Optional[str] = None
     docs_url: Optional[str] = None
-    save_openapi_raw: bool = False
+    save_openapi_raw: bool = False  # por defecto NO guardamos el spec completo
 
 
 class MCPUpdateIn(BaseModel):
@@ -111,10 +124,15 @@ class MCPOut(BaseModel):
     updated_ts: int
 
 
-# ---------------- Page ----------------
 
+
+# ---------------- Page ----------------
 @router.get("/", response_class=HTMLResponse)
 def index(request: Request, response: Response):
+    """
+    Página principal.
+    Creamos cookie de sesión (por ahora solo para futuro soporte multi-sesión).
+    """
     session_id = request.cookies.get(SESSION_COOKIE_NAME)
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -132,7 +150,6 @@ def index(request: Request, response: Response):
     )
 
 
-# ---------------- Helpers ----------------
 
 def _mcp_to_out(m) -> dict:
     return {
@@ -158,6 +175,15 @@ def _mcp_to_out(m) -> dict:
 
 
 def _build_tools_ctx_for_project(project) -> list[dict]:
+    """
+    Construye el contexto de herramientas (TOOLS) basado en:
+      - project.mcp_ids
+      - MCPs existentes en store
+      - MCPs globalmente activos
+      - Endpoints descubiertos desde OpenAPI
+
+    Esto es lo que ve el modelo para decidir qué endpoint usar.
+    """
     tools: list[dict] = []
     for mcp_id in (project.mcp_ids or []):
         m = mcp_store.get_mcp(mcp_id)
@@ -189,38 +215,65 @@ def _build_tools_ctx_for_project(project) -> list[dict]:
 
 
 def _router_system_prompt(tools_ctx: list[dict]) -> str:
+    """
+    Prompt estricto: el modelo debe devolver JSON controlable.
+    Forzamos plan cuando el usuario pide pasos/secuencia.
+    """
     return (
         "Eres un router de herramientas.\n"
         "Tienes acceso a servicios MCP descritos en TOOLS.\n"
         "Tu tarea es decidir y devolver SOLO un JSON (una línea) con la acción.\n\n"
+
         "IMPORTANTE:\n"
         "- Responde SIEMPRE con un JSON válido en UNA SOLA LÍNEA.\n"
         "- NO uses markdown.\n"
         "- NO escribas texto fuera del JSON.\n\n"
+
         "ACCIONES DISPONIBLES:\n"
         "1) Responder sin llamar:\n"
         "{\"action\":\"respond\",\"text\":\"...\"}\n\n"
+
         "2) Llamar MCP (un solo paso):\n"
         "{\"action\":\"mcp_call\",\"mcp_id\":\"...\",\"method\":\"GET|POST|PUT|PATCH|DELETE\",\"path\":\"/...\",\"query\":{...},\"body\":{...}}\n\n"
-        "3) Plan multi-step:\n"
+
+        "3) Plan multi-step (varios pasos):\n"
         "{\"action\":\"plan\",\"goal\":\"...\",\"stop_on_error\":true,\"steps\":["
+        "{\"type\":\"mcp_call\",\"title\":\"...\",\"mcp_id\":\"...\",\"method\":\"POST\",\"path\":\"/command\",\"body\":{\"cmd\":\"...\"}},"
         "{\"type\":\"mcp_call\",\"title\":\"...\",\"mcp_id\":\"...\",\"method\":\"POST\",\"path\":\"/command\",\"body\":{\"cmd\":\"...\"}}"
         "]}\n\n"
-        "REGLA DE ORO:\n"
-        "- Si el usuario pide pasos/secuencia/primero-luego, DEBES devolver action=plan.\n\n"
+
+        "REGLA DE ORO (OBLIGATORIA):\n"
+        "- Si el usuario pide un PLAN, PASOS, SECUENCIA, WORKFLOW, o describe 'primero/luego/después',\n"
+        "  DEBES devolver action=plan (NO respond).\n\n"
+
         "REGLAS:\n"
         "- Solo puedes usar mcp_id/method/path que existan en TOOLS.\n"
         "- No inventes endpoints.\n"
-        "- Si falta info crítica, pide aclaración con action=respond.\n"
-        "- Para comandos usa POST /command con body {\"cmd\":\"...\"}.\n\n"
+        "- Si falta información crítica para ejecutar (p.ej. nombre de archivo), pide aclaración con action=respond.\n"
+        "- Cada step debe ser atómico y ejecutable.\n"
+        "- Si el usuario pide validación, incluye un step de verificación explícito.\n"
+        "- Para ejecutar comandos usa POST /command con body {\"cmd\":\"...\"}.\n"
+        "- Nunca uses body {\"command\":...}; siempre usa {\"cmd\":...}.\n\n"
+
+        "EJEMPLO (crear archivo, validar, escribir, mostrar, borrar):\n"
+        "{\"action\":\"plan\",\"goal\":\"Crear archivo y validarlo\",\"stop_on_error\":true,\"steps\":["
+        "{\"type\":\"mcp_call\",\"title\":\"Crear archivo\",\"mcp_id\":\"ID\",\"method\":\"POST\",\"path\":\"/command\",\"body\":{\"cmd\":\"echo. > tmp_piloto.txt\"}},"
+        "{\"type\":\"mcp_call\",\"title\":\"Validar existencia\",\"mcp_id\":\"ID\",\"method\":\"POST\",\"path\":\"/command\",\"body\":{\"cmd\":\"if exist tmp_piloto.txt (echo EXISTS) else (echo MISSING & exit /b 1)\"}},"
+        "{\"type\":\"mcp_call\",\"title\":\"Escribir texto\",\"mcp_id\":\"ID\",\"method\":\"POST\",\"path\":\"/command\",\"body\":{\"cmd\":\"echo Hola>> tmp_piloto.txt\"}}"
+        "]}\n\n"
+
         f"TOOLS={json.dumps(tools_ctx, ensure_ascii=False)}"
     )
 
 
-# ---------------- API: Projects ----------------
 
+
+
+
+# ---------------- API: Projects ----------------
 @router.get("/api/projects")
 def api_list_projects():
+    """Lista proyectos."""
     return {
         "projects": [
             {"id": p.id, "name": p.name, "updated_ts": p.updated_ts}
@@ -231,8 +284,17 @@ def api_list_projects():
 
 @router.post("/api/projects")
 def api_create_project(payload: CreateProjectIn):
+    """
+    MEJORA (A):
+    Al crear un proyecto, creamos un chat por defecto para que el proyecto sea usable
+    inmediatamente y el frontend siempre pueda enviar mensajes.
+    """
     p = store.create_project(payload.name, context=payload.context or "", mcp_ids=payload.mcp_ids or [])
+
+
+    # Crear un chat por defecto dentro del proyecto
     c = store.create_chat(p.id, "New chat")
+
     return {
         "project": {"id": p.id, "name": p.name, "updated_ts": p.updated_ts},
         "chat": {"id": c.id, "title": c.title, "updated_ts": c.updated_ts},
@@ -241,23 +303,33 @@ def api_create_project(payload: CreateProjectIn):
 
 @router.get("/api/projects/{project_id}")
 def api_get_project(project_id: str):
+    """Obtiene un proyecto (incluye context)."""
     p = store.get_project(project_id)
     if not p:
         return JSONResponse({"error": "Project not found"}, status_code=404)
+
     return {
-        "project": {
-            "id": p.id,
-            "name": p.name,
-            "context": p.context,
-            "mcp_ids": p.mcp_ids,
-            "updated_ts": p.updated_ts,
-        }
+    "project": {
+        "id": p.id,
+        "name": p.name,
+        "context": p.context,
+        "mcp_ids": p.mcp_ids,  # NUEVO
+        "updated_ts": p.updated_ts,
     }
+    }
+
 
 
 @router.patch("/api/projects/{project_id}")
 def api_update_project(project_id: str, payload: UpdateProjectIn):
-    ok = store.update_project(project_id, name=payload.name, context=payload.context, mcp_ids=payload.mcp_ids)
+    """Actualiza nombre y/o contexto del proyecto."""
+
+    ok = store.update_project(
+        project_id,
+        name=payload.name,
+        context=payload.context,
+        mcp_ids=payload.mcp_ids,  # NUEVO
+    )
     if not ok:
         return JSONResponse({"error": "Project not found"}, status_code=404)
     return {"ok": True}
@@ -265,6 +337,7 @@ def api_update_project(project_id: str, payload: UpdateProjectIn):
 
 @router.delete("/api/projects/{project_id}")
 def api_delete_project(project_id: str):
+    """Elimina proyecto y todos sus chats."""
     ok = store.delete_project(project_id)
     if not ok:
         return JSONResponse({"error": "Project not found"}, status_code=404)
@@ -272,9 +345,9 @@ def api_delete_project(project_id: str):
 
 
 # ---------------- API: Chats ----------------
-
 @router.get("/api/projects/{project_id}/chats")
 def api_list_chats(project_id: str):
+    """Lista chats dentro de un proyecto."""
     if not store.get_project(project_id):
         return JSONResponse({"error": "Project not found"}, status_code=404)
 
@@ -288,6 +361,7 @@ def api_list_chats(project_id: str):
 
 @router.post("/api/projects/{project_id}/chats")
 def api_create_chat(project_id: str, payload: CreateChatIn):
+    """Crea un chat dentro de un proyecto."""
     try:
         c = store.create_chat(project_id, payload.title or "New chat")
     except ValueError:
@@ -297,6 +371,7 @@ def api_create_chat(project_id: str, payload: CreateChatIn):
 
 @router.patch("/api/chats/{chat_id}")
 def api_rename_chat(chat_id: str, payload: RenameChatIn):
+    """Renombra un chat."""
     ok = store.rename_chat(chat_id, payload.title)
     if not ok:
         return JSONResponse({"error": "Chat not found"}, status_code=404)
@@ -305,23 +380,37 @@ def api_rename_chat(chat_id: str, payload: RenameChatIn):
 
 @router.get("/api/chats/{chat_id}/messages")
 def api_get_messages(chat_id: str):
+    """Devuelve mensajes del chat (sin system porque system se arma en payload al LLM)."""
     c = store.get_chat(chat_id)
     if not c:
         return JSONResponse({"error": "Chat not found"}, status_code=404)
+
     msgs = [{"role": m.role, "content": m.content, "ts": m.ts} for m in c.messages]
     return {"chat": {"id": c.id, "title": c.title}, "messages": msgs}
 
 
-# ---------------- API: Send ----------------
+
+# ---------------- API: Send message ----------------
 
 @router.post("/api/send")
 async def api_send(payload: SendMessageIn, request: Request):
-    trace_id = getattr(request.state, "trace_id", request.headers.get("X-Trace-Id", "-"))
-    log = get_logger(trace_id)
-    plog = get_prompt_logger(trace_id)
+    """
+    Chat -> MCP Router
+    - El modelo decide si llamar un MCP y cuál endpoint usar (dinámico, sin hardcodear).
+    - El backend valida contra endpoints descubiertos (allowlist) y ejecuta la llamada.
+    - NUEVO (Fase 3): soporta "plan" para ejecutar secuencias de pasos con validación y logs.
+    """
 
+    # Usa el trace_id del middleware (si existe)
+    trace_id = getattr(request.state, "trace_id", request.headers.get("X-Trace-Id", "-"))
+
+    log = get_logger(trace_id)
+    plog = get_prompt_logger(trace_id)  # ahora siempre tiene handler
+
+    # (DEBUG opcional - puedes borrar luego)
     log.info(
-        f"event=debug.env LOG_PROMPTS={os.getenv('LOG_PROMPTS')} LOG_DIR={os.getenv('LOG_DIR')} LOG_PROMPT_FILE={os.getenv('LOG_PROMPT_FILE')}"
+        f"event=debug.env LOG_PROMPTS={os.getenv('LOG_PROMPTS')} "
+        f"LOG_DIR={os.getenv('LOG_DIR')} LOG_PROMPT_FILE={os.getenv('LOG_PROMPT_FILE')}"
     )
     log.info(f"event=debug.prompts_enabled value={prompts_enabled()}")
     log.info(f"event=debug.prompt_logger_handlers count={len(plog.logger.handlers)}")
@@ -331,41 +420,81 @@ async def api_send(payload: SendMessageIn, request: Request):
     chat_id = payload.chat_id
     text = (payload.message or "").strip()
 
+    # 0) inicio
     log.info(f"event=send.start chat_id={chat_id} user_len={len(text)}")
-
     if not text:
+        log.info(f"event=send.reject reason=empty_message chat_id={chat_id}")
         return JSONResponse({"error": "Mensaje vacío"}, status_code=400)
 
     c = store.get_chat(chat_id)
     if not c:
+        log.info(f"event=send.reject reason=chat_not_found chat_id={chat_id}")
         return JSONResponse({"error": "Chat not found"}, status_code=404)
 
+    # 1) guardar user
     store.add_message(chat_id, "user", text)
+    log.info(f"event=store.user_saved chat_id={chat_id}")
 
+    # 2) contexto normal del chat (system + historial)
     messages_for_llm = store.get_messages_payload(chat_id)
+    log.info(f"event=payload.built chat_id={chat_id} messages={len(messages_for_llm)}")
 
+    # LOG SEGURO del prompt base (sin contenido): roles, tamaños, hashes
     summ = summarize_messages(messages_for_llm)
     log.info(
-        f"event=prompt.base.built chat_id={chat_id} msg_count={summ['count']} total_chars={summ['total_chars']} roles={summ['roles']}"
+        f"event=prompt.base.built chat_id={chat_id} "
+        f"msg_count={summ['count']} total_chars={summ['total_chars']} roles={summ['roles']}"
     )
+
+    # LOG COMPLETO (sanitizado) SIEMPRE
     plog.info("event=prompt.base.content\n" + serialize_messages_for_promptlog(messages_for_llm))
 
+    # 3) construir tools según proyecto
     proj = store.get_project(c.project_id)
     tools_ctx = _build_tools_ctx_for_project(proj) if proj else []
+
+    # Router system prompt (reutilizar)
     router_sys = _router_system_prompt(tools_ctx)
 
     log.info(f"event=prompt.router.system chat_id={chat_id} chars={len(router_sys)} mcp_count={len(tools_ctx)}")
     plog.info("event=prompt.router.system.content\n" + serialize_text_for_promptlog("ROUTER_SYSTEM", router_sys))
 
-    router_messages = [{"role": "system", "content": router_sys}] + messages_for_llm
+    # logs de herramientas sin volcar contenido
+    try:
+        mcp_count = len(tools_ctx)
+        endpoints_total = 0
+        per_mcp = []
+        for t in tools_ctx:
+            eps = t.get("endpoints") if isinstance(t, dict) else None
+            n = len(eps) if isinstance(eps, list) else 0
+            endpoints_total += n
+            mid = (t.get("mcp_id") or t.get("id") or "") if isinstance(t, dict) else ""
+            if mid:
+                per_mcp.append(f"{mid}:{n}")
+        per_mcp_str = ",".join(per_mcp) if per_mcp else "-"
+        log.info(
+            f"event=tools.built project_id={getattr(proj,'id',None)} "
+            f"mcp_count={mcp_count} endpoints_total={endpoints_total} endpoints_per_mcp={per_mcp_str}"
+        )
+    except Exception:
+        log.info("event=tools.built.error err=Exception")
+
+    # 4) construir prompt final del router
+    router_messages = [{"role": "system", "content": router_sys}]
+    router_messages.extend(messages_for_llm)
 
     rs = summarize_messages(router_messages)
     log.info(
-        f"event=prompt.router.built chat_id={chat_id} msg_count={rs['count']} total_chars={rs['total_chars']} roles={rs['roles']}"
+        f"event=prompt.router.built chat_id={chat_id} "
+        f"msg_count={rs['count']} total_chars={rs['total_chars']} roles={rs['roles']}"
     )
+
+    # LOG COMPLETO (sanitizado) SIEMPRE
     plog.info("event=prompt.router.content\n" + serialize_messages_for_promptlog(router_messages))
 
+    # 5) llamada “router” al modelo (decisión en JSON)
     t_router = time.time()
+    log.info(f"event=router.call.start model={getattr(settings,'openai_model','-')} temp=0 chat_id={chat_id}")
     try:
         raw = client.chat(router_messages, temperature=0)
     except Exception as e:
@@ -374,25 +503,35 @@ async def api_send(payload: SendMessageIn, request: Request):
 
     log.info(f"event=router.call.done duration_ms={int((time.time()-t_router)*1000)} raw_len={len(raw)}")
 
+    # 6) parse decision
     try:
         decision = json.loads(raw)
     except Exception:
+        log.info("event=router.decision.parse_error err=Exception")
         store.add_message(chat_id, "assistant", raw)
         store.chat_preview_title(chat_id)
-        return {"reply": raw, "warning": "El modelo no devolvió JSON."}
+        log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=raw_fallback")
+        return {"reply": raw, "warning": "El modelo no devolvió JSON. Ajusta prompt/temperatura."}
 
     action = (decision.get("action") or "").strip()
     log.info(f"event=router.decision.parsed action={action} chat_id={chat_id}")
 
-    # respond
+    # -----------------------------
+    # ACTION: respond
+    # -----------------------------
     if action == "respond":
         reply = str(decision.get("text") or "").strip() or "(sin respuesta)"
         store.add_message(chat_id, "assistant", reply)
         store.chat_preview_title(chat_id)
-        log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=respond")
+        log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=respond assistant_len={len(reply)}")
         return {"reply": reply}
 
-    # plan -> DRAFT (requiere confirmación)
+    # -----------------------------
+    # ACTION: plan  (Fase 3)
+    # -----------------------------
+    # -----------------------------
+    # ACTION: plan  (Draft -> requiere confirmación)
+    # -----------------------------
     if action == "plan":
         from src.agent.plan_models import PlanRun, PlanStep
 
@@ -406,42 +545,63 @@ async def api_send(payload: SendMessageIn, request: Request):
                 query=(obj.get("query") if isinstance(obj.get("query"), dict) else None),
                 body=obj.get("body"),
             )
+
             subs = obj.get("substeps")
             if isinstance(subs, list):
                 st.substeps = [_parse_step(x) for x in subs if isinstance(x, dict)]
                 if st.substeps and st.type != "subplan":
                     st.type = "subplan"
+
             return st
 
         goal = str(decision.get("goal") or "").strip() or "Plan"
         steps_raw = decision.get("steps")
 
+        # Validación mínima de estructura
         if not isinstance(steps_raw, list) or not steps_raw:
             reply = "Plan inválido: faltan 'steps'."
             store.add_message(chat_id, "assistant", reply)
+            log.info("event=plan.reject reason=missing_steps")
             return {"reply": reply}
 
-        plan = PlanRun(goal=goal, steps=[_parse_step(s) for s in steps_raw if isinstance(s, dict)])
+        # Construir PlanRun
+        plan = PlanRun(
+            goal=goal,
+            steps=[_parse_step(s) for s in steps_raw if isinstance(s, dict)],
+        )
+
         if not plan.steps:
             reply = "Plan inválido: 'steps' no contiene pasos válidos."
             store.add_message(chat_id, "assistant", reply)
+            log.info("event=plan.reject reason=empty_parsed_steps")
             return {"reply": reply}
 
-        # guardar en chat (opcional)
+        # Guardar plan en chat (igual que antes)
         try:
             if hasattr(store, "add_plan"):
                 store.add_plan(chat_id, plan)
             else:
-                cc = store.get_chat(chat_id)
-                if not hasattr(cc, "plan_runs") or cc.plan_runs is None:
-                    cc.plan_runs = []
-                cc.plan_runs.append(plan)
+                c = store.get_chat(chat_id)
+                if not hasattr(c, "plan_runs") or c.plan_runs is None:
+                    c.plan_runs = []
+                c.plan_runs.append(plan)
         except Exception:
             log.info("event=plan.store.error err=Exception")
 
+        # -----------------------------
+        # Crear run para polling (draft)
+        # -----------------------------
         run = plan_run_store.create(chat_id=chat_id, plan_id=plan.id, goal=plan.goal)
-        plan_run_store.update(run.run_id, status="draft", plan=plan.__dict__, last_event="plan_draft")
 
+        # Guardamos snapshot del plan en el run para mostrarlo luego
+        plan_run_store.update(
+            run.run_id,
+            status="draft",
+            plan=plan.__dict__,
+            last_event="plan_draft",
+        )
+
+        # Mensaje al chat: propuesta + pedir confirmación
         pretty = json.dumps(
             {
                 "action": "plan",
@@ -462,9 +622,15 @@ async def api_send(payload: SendMessageIn, request: Request):
         )
         store.chat_preview_title(chat_id)
 
-        log.info(f"event=plan.draft chat_id={chat_id} run_id={run.run_id} plan_id={plan.id} steps={len(plan.steps)}")
-        log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=plan_draft run_id={run.run_id}")
+        log.info(
+            f"event=plan.draft chat_id={chat_id} run_id={run.run_id} "
+            f"plan_id={plan.id} steps={len(plan.steps)} goal_len={len(plan.goal)}"
+        )
 
+        # Responder rápido: NO ejecutar todavía
+        log.info(
+            f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=plan_draft run_id={run.run_id}"
+        )
         return {
             "run_id": run.run_id,
             "status": "draft",
@@ -472,7 +638,10 @@ async def api_send(payload: SendMessageIn, request: Request):
             "plan": plan.__dict__,
         }
 
-    # mcp_call (igual que tenías)
+
+    # -----------------------------
+    # ACTION: mcp_call
+    # -----------------------------
     if action == "mcp_call":
         mcp_id = (decision.get("mcp_id") or "").strip()
         method = (decision.get("method") or "").strip().upper()
@@ -480,51 +649,81 @@ async def api_send(payload: SendMessageIn, request: Request):
         query = decision.get("query") if isinstance(decision.get("query"), dict) else None
         body = decision.get("body")
 
+        # --- Normalización de body para /command ---
         if method == "POST" and path == "/command":
             if isinstance(body, dict):
                 if "cmd" not in body and "command" in body:
                     body["cmd"] = body.pop("command")
                 if "cmd" not in body and "text" in body:
                     body["cmd"] = body.pop("text")
+
             if not isinstance(body, dict) or "cmd" not in body or not str(body["cmd"]).strip():
                 reply = "La llamada a /command requiere body JSON con el campo 'cmd'."
                 store.add_message(chat_id, "assistant", reply)
+                log.info("event=mcp.reject reason=missing_cmd")
                 return {"reply": reply}
+
+        body_type = type(body).__name__
+        q_keys = ",".join(list(query.keys())) if isinstance(query, dict) else "-"
+        log.info(
+            f"event=mcp.intent chat_id={chat_id} mcp_id={mcp_id} method={method} path={path} "
+            f"query_keys={q_keys} body_type={body_type}"
+        )
 
         if not (mcp_id and method and path):
             reply = "La solicitud de herramienta es inválida (faltan campos)."
             store.add_message(chat_id, "assistant", reply)
+            log.info(f"event=mcp.reject reason=missing_fields duration_ms={int((time.time()-t_total)*1000)}")
             return {"reply": reply}
 
         m = mcp_store.get_mcp(mcp_id)
         if not m or not m.is_active:
             reply = "El MCP solicitado no existe o está inactivo."
             store.add_message(chat_id, "assistant", reply)
+            log.info(
+                f"event=mcp.reject reason=inactive_or_missing mcp_id={mcp_id} duration_ms={int((time.time()-t_total)*1000)}"
+            )
             return {"reply": reply}
 
         if proj and mcp_id not in (proj.mcp_ids or []):
             reply = "Ese MCP no está habilitado para este proyecto."
             store.add_message(chat_id, "assistant", reply)
+            log.info(f"event=mcp.reject reason=not_enabled_for_project project_id={getattr(proj,'id',None)} mcp_id={mcp_id}")
             return {"reply": reply}
 
+        extra_headers: Dict[str, str] = {}
+
+        # invocación MCP
         t_mcp = time.time()
+        log.info(f"event=mcp.invoke.start mcp_id={m.id} method={method} path={path}")
         try:
             status_code, result = invoke_mcp_sync(
                 mcp=m,
                 call=MCPCall(mcp_id=m.id, method=method, path=path, query=query, body=body),
-                extra_headers={},
+                extra_headers=extra_headers,
             )
         except MCPInvokeError:
             reply = "No se pudo ejecutar el MCP."
             store.add_message(chat_id, "assistant", reply)
+            log.info(f"event=mcp.invoke.error duration_ms={int((time.time()-t_mcp)*1000)} err=MCPInvokeError")
             return {"reply": reply}
         except Exception as e:
             reply = f"Error llamando MCP: {e}"
             store.add_message(chat_id, "assistant", reply)
+            log.info(f"event=mcp.invoke.error duration_ms={int((time.time()-t_mcp)*1000)} err={type(e).__name__}")
             return {"reply": reply}
 
-        log.info(f"event=mcp.invoke.done duration_ms={int((time.time()-t_mcp)*1000)} status_code={status_code}")
+        try:
+            result_len = len(result) if isinstance(result, (str, list, dict)) else -1
+        except Exception:
+            result_len = -1
 
+        log.info(
+            f"event=mcp.invoke.done duration_ms={int((time.time()-t_mcp)*1000)} status_code={status_code} "
+            f"result_type={type(result).__name__} result_len={result_len}"
+        )
+
+        # 2ª llamada al modelo: redactar respuesta con el resultado
         tool_result = {
             "mcp_id": m.id,
             "name": m.name,
@@ -543,23 +742,44 @@ async def api_send(payload: SendMessageIn, request: Request):
             "TOOL_RESULT=" + json.dumps(tool_result, ensure_ascii=False)
         )
 
+        log.info(f"event=prompt.summarize.system chat_id={chat_id} chars={len(summarize_system)} status_code={status_code}")
         plog.info("event=prompt.summarize.system.content\n" + serialize_text_for_promptlog("SUMMARIZE_SYSTEM", summarize_system))
 
         summarize_messages_for_llm = messages_for_llm + [{"role": "system", "content": summarize_system}]
 
+        ss = summarize_messages(summarize_messages_for_llm)
+        log.info(
+            f"event=prompt.summarize.built chat_id={chat_id} "
+            f"msg_count={ss['count']} total_chars={ss['total_chars']} roles={ss['roles']}"
+        )
+        plog.info("event=prompt.summarize.content\n" + serialize_messages_for_promptlog(summarize_messages_for_llm))
+
+        t_sum = time.time()
+        log.info(
+            f"event=summarize.call.start model={getattr(settings,'openai_model','-')} "
+            f"temp={getattr(settings,'temperature','-')} chat_id={chat_id}"
+        )
         try:
             final = client.chat(summarize_messages_for_llm, temperature=settings.temperature)
-        except Exception:
+            log.info(f"event=summarize.call.done duration_ms={int((time.time()-t_sum)*1000)} final_len={len(final)}")
+        except Exception as e:
             final = f"Resultado MCP ({status_code}): {tool_result}"
+            log.info(f"event=summarize.call.error duration_ms={int((time.time()-t_sum)*1000)} err={type(e).__name__}")
 
         store.add_message(chat_id, "assistant", final)
         store.chat_preview_title(chat_id)
 
+        log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=mcp_call assistant_len={len(final)}")
         return {"reply": final, "tool_result": tool_result}
 
+    # Acción desconocida
     reply = "Respuesta inválida del modelo (action desconocida)."
     store.add_message(chat_id, "assistant", reply)
+    log.info(f"event=router.decision.invalid action={action} duration_ms={int((time.time()-t_total)*1000)}")
     return {"reply": reply}
+
+
+
 
 
 # ---------------- MCP Routes ----------------
@@ -569,7 +789,13 @@ def api_list_mcps():
     mcps = mcp_store.list_mcps()
     return {
         "ok": True,
-        "items": [{**_mcp_to_out(m), "endpoint_count": len(m.endpoints or [])} for m in mcps],
+        "items": [
+            {
+                **_mcp_to_out(m),
+                "endpoint_count": len(m.endpoints or []),
+            }
+            for m in mcps
+        ],
     }
 
 
@@ -581,19 +807,27 @@ async def api_register_mcp(payload: MCPRegisterIn):
             name=payload.name,
             docs_url=payload.docs_url,
             save_openapi_raw=payload.save_openapi_raw,
-            allow_offline=True,
+            allow_offline=True,  # NUEVO
         )
+
         out = _mcp_to_out(m)
         if not m.openapi_url:
             return JSONResponse(
-                {"ok": True, "item": out, "warning": "MCP registrado pero offline; ejecuta /refresh cuando esté disponible."},
+                {
+                    "ok": True,
+                    "item": out,
+                    "warning": "MCP registrado pero offline; ejecuta /refresh cuando esté disponible.",
+                },
                 status_code=201,
             )
+
         return JSONResponse({"ok": True, "item": out}, status_code=201)
+
     except ValueError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"Error inesperado: {e}"}, status_code=500)
+
 
 
 @router.get("/api/mcps/{mcp_id}")
@@ -610,20 +844,32 @@ async def api_update_mcp(mcp_id: str, payload: MCPUpdateIn):
     if not m:
         return JSONResponse({"ok": False, "error": "MCP no encontrado"}, status_code=404)
 
-    ok = mcp_store.update_mcp(mcp_id, name=payload.name, base_url=payload.base_url, docs_url=payload.docs_url)
+    ok = mcp_store.update_mcp(
+        mcp_id,
+        name=payload.name,
+        base_url=payload.base_url,
+        docs_url=payload.docs_url,
+    )
     if not ok:
         return JSONResponse({"ok": False, "error": "MCP no encontrado"}, status_code=404)
 
+    # Si cambiaron base_url, conviene refrescar endpoints
     if payload.base_url is not None:
         try:
-            await mcp_service.refresh(mcp_id, save_openapi_raw=False)
+            m = await mcp_service.refresh(mcp_id, save_openapi_raw=False)
         except Exception as e:
+            # No abortamos el update, pero avisamos
             return JSONResponse(
-                {"ok": True, "item": _mcp_to_out(mcp_store.get_mcp(mcp_id)), "warning": f"Actualizado, pero refresh falló: {e}"},
+                {
+                    "ok": True,
+                    "item": _mcp_to_out(mcp_store.get_mcp(mcp_id)),
+                    "warning": f"Actualizado, pero refresh falló: {e}",
+                },
                 status_code=200,
             )
 
-    return {"ok": True, "item": _mcp_to_out(mcp_store.get_mcp(mcp_id))}
+    m2 = mcp_store.get_mcp(mcp_id)
+    return {"ok": True, "item": _mcp_to_out(m2)}
 
 
 @router.delete("/api/mcps/{mcp_id}")
@@ -653,9 +899,8 @@ async def api_refresh_mcp(mcp_id: str):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=404)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"Refresh falló: {e}"}, status_code=400)
+    
 
-
-# ---------------- Runs (polling) ----------------
 
 @router.get("/api/runs/{run_id}")
 def api_get_run(run_id: str):
@@ -677,10 +922,12 @@ async def api_start_run(run_id: str, request: Request):
     if r.status != "draft":
         return JSONResponse({"error": f"Run no está en draft (status={r.status})"}, status_code=409)
 
+    # Recuperar plan snapshot
     plan_dict = r.plan
     if not isinstance(plan_dict, dict):
         return JSONResponse({"error": "Run draft sin plan"}, status_code=500)
 
+    # reconstruir PlanRun desde dict
     from src.agent.plan_models import PlanRun, PlanStep
 
     def step_from_dict(d: dict) -> PlanStep:
@@ -704,15 +951,18 @@ async def api_start_run(run_id: str, request: Request):
         goal=plan_dict.get("goal", "Plan"),
         steps=[step_from_dict(s) for s in (plan_dict.get("steps") or []) if isinstance(s, dict)],
     )
+    # si tu PlanRun tiene id, intenta respetarlo
     if "id" in plan_dict:
         try:
             plan.id = plan_dict["id"]
         except Exception:
             pass
 
+    # project para validación (igual que en send)
     chat = store.get_chat(r.chat_id)
     proj = store.get_project(chat.project_id) if chat else None
 
+    # marcar running y arrancar background
     plan_run_store.update(run_id, status="running", last_event="run_start_confirmed")
     store.add_message(r.chat_id, "assistant", f"Confirmado. Ejecutando plan… (run_id={run_id})")
 
@@ -731,5 +981,6 @@ async def api_start_run(run_id: str, request: Request):
     )
 
     return {"ok": True, "run_id": run_id, "status": "running"}
+
 
 
