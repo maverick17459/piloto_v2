@@ -79,3 +79,8 @@ class PlanRunStore:
 
     def to_dict(self, r: PlanRunState) -> Dict[str, Any]:
         return asdict(r)
+    
+    def list_all(self):
+        with self._lock:
+            return list(self._runs.values())
+

@@ -649,6 +649,10 @@
 
         activeRunId: null,
         runPollTimer: null,
+
+        // ✅ NUEVO: flags para polling secuencial (sin setInterval async)
+        polling: false,
+        pollAbort: false,
       }))();
 
       // ============================================================
@@ -725,6 +729,15 @@
           scrollToBottom();
         }
 
+        // ✅ NUEVO: agregar mensaje sin hacer scroll (para render masivo en loadMessages)
+        function addMessageNoScroll(role, text) {
+          if (!el.chatInner) return;
+          const row = document.createElement("div");
+          row.className = `msg ${role === "user" ? "user" : "assistant"}`;
+          row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+          el.chatInner.appendChild(row);
+        }
+
         function addTyping() {
           if (!el.chatInner) return null;
           const typing = document.createElement("div");
@@ -742,6 +755,7 @@
           autoResize,
           clearChatView,
           addMessage,
+          addMessageNoScroll, // ✅ export nuevo
           addTyping,
           scrollToBottom,
         };
@@ -810,7 +824,7 @@
 
         if (modalInput) {
           modalInput.addEventListener("keydown", (e) => {
-            if (e.key === "Escape") closeModal();
+            if (e.key === "Escape") closeModal;
             if (e.key === "Enter" && !e.shiftKey) modalOk.click();
           });
         }
@@ -839,36 +853,36 @@
           modal.style.maxWidth = "96vw";
 
           modal.innerHTML = `
-        <div class="modal-head">
-          <div class="modal-title">MCP del proyecto: ${UI.escapeHtml(
-            project.name
-          )}</div>
-          <button class="icon-btn" data-close title="Cerrar">✕</button>
-        </div>
-
-        <div class="modal-body">
-          <div class="muted" style="font-size:12px">
-            Selecciona qué MCPs estarán asociados a este proyecto.
-            <br/>
-            (Los MCP globalmente inactivos aparecen bloqueados)
+          <div class="modal-head">
+            <div class="modal-title">MCP del proyecto: ${UI.escapeHtml(
+              project.name
+            )}</div>
+            <button class="icon-btn" data-close title="Cerrar">✕</button>
           </div>
 
-          <div style="display:flex; gap:10px; margin-bottom:10px">
-            <input id="mcpSearch" class="modal-input" placeholder="Buscar MCP…" style="flex:1; min-height: 38px" />
-            <button class="btn" id="mcpAll">Todos</button>
-            <button class="btn" id="mcpNone">Ninguno</button>
+          <div class="modal-body">
+            <div class="muted" style="font-size:12px">
+              Selecciona qué MCPs estarán asociados a este proyecto.
+              <br/>
+              (Los MCP globalmente inactivos aparecen bloqueados)
+            </div>
+
+            <div style="display:flex; gap:10px; margin-bottom:10px">
+              <input id="mcpSearch" class="modal-input" placeholder="Buscar MCP…" style="flex:1; min-height: 38px" />
+              <button class="btn" id="mcpAll">Todos</button>
+              <button class="btn" id="mcpNone">Ninguno</button>
+            </div>
+
+            <div id="mcpToggleList" style="max-height:360px; overflow:auto; border:1px solid var(--border); border-radius:12px;"></div>
+
+            <div id="mcpErr" class="muted" style="color:#b91c1c; margin-top:10px; display:none;"></div>
           </div>
 
-          <div id="mcpToggleList" style="max-height:360px; overflow:auto; border:1px solid var(--border); border-radius:12px;"></div>
-
-          <div id="mcpErr" class="muted" style="color:#b91c1c; margin-top:10px; display:none;"></div>
-        </div>
-
-        <div class="modal-actions">
-          <button class="btn" data-cancel>Cancelar</button>
-          <button class="btn primary" data-save>Guardar</button>
-        </div>
-      `;
+          <div class="modal-actions">
+            <button class="btn" data-cancel>Cancelar</button>
+            <button class="btn primary" data-save>Guardar</button>
+          </div>
+        `;
 
           overlay.appendChild(modal);
           document.body.appendChild(overlay);
@@ -1212,6 +1226,11 @@
       // Chat (mensajes + send + polling)
       // ============================================================
       const Chat = (() => {
+        // ✅ NUEVO: sleep helper para polling secuencial
+        function sleep(ms) {
+          return new Promise((r) => setTimeout(r, ms));
+        }
+
         async function loadMessages() {
           if (!State.selectedChatId) return UI.clearChatView();
 
@@ -1229,85 +1248,68 @@
           </div>
         `;
           } else {
-            msgs.forEach((m) => UI.addMessage(m.role, m.content));
+            // ✅ CAMBIO: render masivo sin scroll por mensaje
+            msgs.forEach((m) => UI.addMessageNoScroll(m.role, m.content));
           }
           UI.scrollToBottom();
         }
 
         function stopRunPolling() {
+          // ✅ CAMBIO: además de limpiar timer, aborta loop
+          State.pollAbort = true;
+          State.polling = false;
+
           if (State.runPollTimer) clearInterval(State.runPollTimer);
           State.runPollTimer = null;
           State.activeRunId = null;
         }
 
         async function pollRun(runId) {
-          stopRunPolling();
+          // ✅ CAMBIO: polling secuencial (sin setInterval async)
+          stopRunPolling(); // mantiene compat (limpia todo)
           State.activeRunId = runId;
 
-          // tick inmediato
-          await tick();
+          State.pollAbort = false;
+          if (State.polling) return; // evita doble polling
+          State.polling = true;
 
-          // interval
-          State.runPollTimer = setInterval(tick, 700);
-
-          async function tick() {
-            // si el polling ya no corresponde, corta
-            if (State.activeRunId !== runId) return stopRunPolling();
-            if (!State.selectedChatId) return stopRunPolling();
-
-            try {
-              const data = await Api.get(`/api/runs/${runId}`);
-              const st = data?.run?.status || "unknown";
-
-              // refresca mensajes mientras corre
-              await loadMessages();
-
-              if (st === "done" || st === "error" || st === "canceled") {
-                // FLUSH final para atrapar mensajes tardíos (race condition)
-                await loadMessages();
-                await new Promise((r) => setTimeout(r, 250));
-                await loadMessages();
-
+          try {
+            while (!State.pollAbort && State.activeRunId === runId) {
+              if (!State.selectedChatId) {
                 stopRunPolling();
-                UI.setStatus(st === "done" ? "Listo" : "Error");
-              } else {
-                UI.setStatus(`Ejecutando… (${st})`);
+                return;
               }
-            } catch (e) {
-              stopRunPolling();
-              UI.setStatus("Error");
+
+              try {
+                const data = await Api.get(`/api/runs/${runId}`);
+                const st = data?.run?.status || "unknown";
+
+                // refresca mensajes mientras corre
+                await loadMessages();
+
+                if (st === "done" || st === "error" || st === "canceled") {
+                  // FLUSH final para atrapar mensajes tardíos
+                  await loadMessages();
+                  await sleep(250);
+                  await loadMessages();
+
+                  stopRunPolling();
+                  UI.setStatus(st === "done" ? "Listo" : "Error");
+                  return;
+                } else {
+                  UI.setStatus(`Ejecutando… (${st})`);
+                }
+              } catch (e) {
+                stopRunPolling();
+                UI.setStatus("Error");
+                return;
+              }
+
+              await sleep(700);
             }
+          } finally {
+            State.polling = false;
           }
-        }
-
-        async function showPlanConfirmation(runId) {
-          const bar = document.createElement("div");
-          bar.className = "msg assistant";
-          bar.innerHTML = `
-        <div class="bubble">
-          <div style="font-weight:600; margin-bottom:8px">🧠 Plan propuesto</div>
-          <div class="muted" style="margin-bottom:10px">run_id=${UI.escapeHtml(
-            runId
-          )}</div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap">
-            <button class="btn primary" data-act="start">Ejecutar</button>
-          </div>
-        </div>
-      `;
-          UI.el.chatInner.appendChild(bar);
-          UI.scrollToBottom();
-
-          bar.querySelector('[data-act="start"]').onclick = async () => {
-            try {
-              UI.setStatus("Iniciando plan…");
-              await Api.post(`/api/runs/${runId}/start`, {});
-              await loadMessages();
-              await pollRun(runId);
-            } catch (e) {
-              UI.setStatus("Error");
-              alert(e.message || "No se pudo iniciar el plan.");
-            }
-          };
         }
 
         async function ensureChatSelected() {
@@ -1322,7 +1324,9 @@
             UI.setStatus("Creando chat…");
             const data = await Api.post(
               `/api/projects/${State.selectedProjectId}/chats`,
-              { title: "New chat" }
+              {
+                title: "New chat",
+              }
             );
 
             await Data.loadChats();
@@ -1360,21 +1364,19 @@
 
             if (typing) typing.remove();
 
-            if (data.run_id) {
-              await loadMessages();
-              await Data.loadChats();
+            // siempre recargamos mensajes: el backend ya agrega la respuesta/plan al chat
+            await loadMessages();
+            await Data.loadChats();
 
-              if (data.status === "draft") {
-                UI.setStatus("Esperando confirmación…");
-                await showPlanConfirmation(data.run_id);
-              } else {
-                UI.setStatus("Ejecutando…");
-                await pollRun(data.run_id);
-              }
+            //  Arranca polling si el run existe y está queued o running
+            const run = data.run || data; // por si a veces viene plano
+            const st = run.status || "";
+
+            if (data.run_id && (st === "queued" || st === "running")) {
+              UI.setStatus("Ejecutando…");
+              await pollRun(data.run_id);
             } else {
-              UI.addMessage("assistant", data.reply);
               UI.setStatus("Listo");
-              await Data.loadChats();
             }
 
             const currentChat = State.chats.find(
@@ -1383,8 +1385,11 @@
             if (currentChat) UI.el.topTitle.textContent = currentChat.title;
           } catch (e) {
             if (typing) typing.remove();
-            UI.addMessage("assistant", "Error: " + (e.message || e));
             UI.setStatus("Error");
+            UI.addMessage(
+              "assistant",
+              "Ocurrió un error enviando el mensaje. Intenta de nuevo."
+            );
           }
         }
 
@@ -1436,7 +1441,9 @@
               UI.setStatus("Creando chat…");
               const data = await Api.post(
                 `/api/projects/${State.selectedProjectId}/chats`,
-                { title: "New chat" }
+                {
+                  title: "New chat",
+                }
               );
               await Data.loadChats();
               State.selectedChatId = data.chat.id;
@@ -1528,7 +1535,9 @@
                     UI.setStatus("Guardando contexto…");
                     await Api.patch(
                       `/api/projects/${State.selectedProjectId}`,
-                      { context: contextText }
+                      {
+                        context: contextText,
+                      }
                     );
                     UI.setStatus("Listo");
                     Modals.closeModal();

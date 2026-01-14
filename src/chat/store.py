@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from src.agent.plan_models import PlanRun  # nuevo import
 
 import time
@@ -58,6 +58,7 @@ class MemoryStore:
         self.base_system_prompt = base_system_prompt
         self.projects: Dict[str, Project] = {}
         self.chats: Dict[str, Chat] = {}
+        self.chat_state: Dict[str, Dict[str, Any]] = {}
 
         # Proyecto por defecto
         default = self.create_project("Default", context="")
@@ -168,13 +169,43 @@ class MemoryStore:
         return True
 
     def add_message(self, chat_id: str, role: str, content: str) -> None:
-        c = self.chats[chat_id]
+        c = self.chats.get(chat_id)
+        if not c:
+            raise ValueError(f"Chat not found: {chat_id}")
+
         c.messages.append(Message(role=role, content=content))
         c.updated_ts = _now_ms()
 
         p = self.projects.get(c.project_id)
         if p:
             p.updated_ts = _now_ms()
+
+
+
+    def get_state(self, chat_id: str) -> Dict[str, Any]:
+        # Crea el estado si no existe
+        return self.chat_state.setdefault(chat_id, {})
+
+    def set_state(self, chat_id: str, **kwargs: Any) -> None:
+        st = self.get_state(chat_id)
+        st.update(kwargs)
+
+
+    def add_plan(self, chat_id: str, plan: "PlanRun") -> None:
+        c = self.get_chat(chat_id)
+        if not c:
+            raise ValueError("Chat not found")
+        # Asegúrate de que tu chat tenga plan_runs (por tu proyecto, parece que sí)
+        c.plan_runs.append(plan)
+        c.updated_ts = _now_ms()  # o el helper que uses para timestamps
+
+    def get_last_plan(self, chat_id: str) -> Optional["PlanRun"]:
+        c = self.get_chat(chat_id)
+        if not c or not getattr(c, "plan_runs", None):
+            return None
+        if not c.plan_runs:
+            return None
+        return c.plan_runs[-1]
 
     def get_messages_payload(self, chat_id: str) -> List[dict]:
         """
@@ -213,19 +244,8 @@ class MemoryStore:
                 if p:
                     p.updated_ts = _now_ms()
                 return
-            
-        def add_plan(self, chat_id: str, plan: PlanRun) -> None:
-            c = self.get_chat(chat_id)
-            if not c:
-                raise ValueError("Chat not found")
-            c.plan_runs.append(plan)
-            c.updated_ts = _now_ms()
 
-        def get_last_plan(self, chat_id: str) -> Optional[PlanRun]:
-            c = self.get_chat(chat_id)
-            if not c or not c.plan_runs:
-                return None
-            return c.plan_runs[-1]
+            
 
 
 

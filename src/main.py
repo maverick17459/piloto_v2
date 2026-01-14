@@ -1,17 +1,28 @@
-
 # src/main.py
-
 from dotenv import load_dotenv
 load_dotenv()
 
 import time
 import uuid
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+
 from src.web.routes import router
 from src.observability.logger import get_logger
+from src.app_state import plan_run_store, store
+from src.lifecycle.recovery import recover_stale_runs
 
-app = FastAPI(title="ChatGPT Clone Web")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    log = get_logger("startup")
+    recover_stale_runs(plan_run_store, store, log)
+    yield
+
+
+app = FastAPI(title="ChatGPT Clone Web", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,8 +35,9 @@ app.add_middleware(
 @app.middleware("http")
 async def trace_middleware(request: Request, call_next):
     trace_id = request.headers.get("X-Trace-Id") or uuid.uuid4().hex
-    log = get_logger(trace_id)
+    request.state.trace_id = trace_id  # importante
 
+    log = get_logger(trace_id)
 
     t0 = time.time()
     log.info(f"request.start method={request.method} path={request.url.path}")
@@ -39,4 +51,3 @@ async def trace_middleware(request: Request, call_next):
     return response
 
 app.include_router(router)
-
