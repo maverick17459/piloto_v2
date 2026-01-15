@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from src.agent.plan_models import PlanRun  # nuevo import
+from src.observability.logger import get_logger
+
 
 import time
 import uuid
@@ -49,16 +51,24 @@ class Project:
 
 class MemoryStore:
     """
-    Store en memoria (RAM). Se pierde al reiniciar.
+    Store en memoria (RAM). Se pierde al reiniciar, excepto lo que deleguemos a state_repo.
     - Proyecto: agrupa chats + tiene contexto global (instrucciones/memoria)
     - Chat: historial propio (user/assistant)
+    - Chat state: (pending_run_id, active_run_id, etc.) puede persistirse via state_repo (SQLite)
     """
 
-    def __init__(self, base_system_prompt: str) -> None:
+    def __init__(self, base_system_prompt: str, state_repo=None) -> None:
         self.base_system_prompt = base_system_prompt
+
+        # data in-memory
         self.projects: Dict[str, Project] = {}
         self.chats: Dict[str, Chat] = {}
+
+        # fallback in-memory state
         self.chat_state: Dict[str, Dict[str, Any]] = {}
+
+        # optional persistent repo for chat_state
+        self._state_repo = state_repo
 
         # Proyecto por defecto
         default = self.create_project("Default", context="")
@@ -102,7 +112,6 @@ class MemoryStore:
             p.context = context
 
         if mcp_ids is not None:
-            # Normaliza: str, sin vacíos, sin duplicados, orden estable
             cleaned: List[str] = []
             seen = set()
             for x in mcp_ids:
@@ -117,18 +126,13 @@ class MemoryStore:
         return True
 
     def delete_project(self, project_id: str) -> bool:
-        """
-        Elimina un proyecto y todos sus chats asociados.
-        """
         if project_id not in self.projects:
             return False
 
-        # 1) borrar chats del proyecto
         chat_ids = [cid for cid, c in self.chats.items() if c.project_id == project_id]
         for cid in chat_ids:
             self.chats.pop(cid, None)
 
-        # 2) borrar proyecto
         self.projects.pop(project_id, None)
         return True
 
@@ -151,7 +155,6 @@ class MemoryStore:
         )
         self.chats[c.id] = c
 
-        # Actualiza timestamp del proyecto
         self.projects[project_id].updated_ts = _now_ms()
         return c
 
@@ -180,24 +183,57 @@ class MemoryStore:
         if p:
             p.updated_ts = _now_ms()
 
-
-
+    # ---------------- Chat state ----------------
     def get_state(self, chat_id: str) -> Dict[str, Any]:
-        # Crea el estado si no existe
+        """
+        Estado transitorio del chat:
+        - pending_run_id
+        - active_run_id
+        - last_run_id / last_run_status / last_run_ts
+        Si hay state_repo (SQLite) delega ahí.
+        """
+        if self._state_repo:
+            # repo devuelve un dict (puede ser vacío)
+            return self._state_repo.get_state(chat_id)
         return self.chat_state.setdefault(chat_id, {})
 
     def set_state(self, chat_id: str, **kwargs: Any) -> None:
-        st = self.get_state(chat_id)
-        st.update(kwargs)
+        log = get_logger("-")
 
+        # Antes (solo para debug). Si repo, leemos state actual desde repo.
+        before = {}
+        try:
+            before = dict(self.get_state(chat_id))
+        except Exception:
+            before = {}
 
+        if self._state_repo:
+            self._state_repo.set_state(chat_id, **kwargs)
+            after = {}
+            try:
+                after = dict(self._state_repo.get_state(chat_id))
+            except Exception:
+                after = {}
+        else:
+            st = self.get_state(chat_id)
+            st.update(kwargs)
+            after = dict(st)
+
+        log.info(
+            "event=chat.state.set chat_id=%s keys=%s before=%s after=%s",
+            chat_id,
+            list(kwargs.keys()),
+            {k: before.get(k) for k in kwargs.keys()},
+            {k: after.get(k) for k in kwargs.keys()},
+        )
+
+    # ---------------- Plans attached to chat (in-memory list) ----------------
     def add_plan(self, chat_id: str, plan: "PlanRun") -> None:
         c = self.get_chat(chat_id)
         if not c:
             raise ValueError("Chat not found")
-        # Asegúrate de que tu chat tenga plan_runs (por tu proyecto, parece que sí)
         c.plan_runs.append(plan)
-        c.updated_ts = _now_ms()  # o el helper que uses para timestamps
+        c.updated_ts = _now_ms()
 
     def get_last_plan(self, chat_id: str) -> Optional["PlanRun"]:
         c = self.get_chat(chat_id)
@@ -207,12 +243,8 @@ class MemoryStore:
             return None
         return c.plan_runs[-1]
 
+    # ---------------- LLM payload ----------------
     def get_messages_payload(self, chat_id: str) -> List[dict]:
-        """
-        Arma el payload al LLM:
-        - 1 mensaje system con prompt base + contexto del proyecto
-        - luego todos los mensajes del chat (user/assistant)
-        """
         c = self.chats[chat_id]
         p = self.projects.get(c.project_id)
 
@@ -227,9 +259,6 @@ class MemoryStore:
         return payload
 
     def chat_preview_title(self, chat_id: str) -> None:
-        """
-        Si el chat sigue llamándose "New chat", usa el primer mensaje del usuario como preview.
-        """
         c = self.chats[chat_id]
         if c.title.lower() != "new chat":
             return
@@ -244,8 +273,3 @@ class MemoryStore:
                 if p:
                     p.updated_ts = _now_ms()
                 return
-
-            
-
-
-

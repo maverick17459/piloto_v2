@@ -638,7 +638,7 @@
       })();
 
       // ============================================================
-      // State (solo estado)
+      // State
       // ============================================================
       const State = (() => ({
         projects: [],
@@ -648,11 +648,12 @@
         selectedChatId: null,
 
         activeRunId: null,
-        runPollTimer: null,
+        pendingRunId: null,
 
-        // ✅ NUEVO: flags para polling secuencial (sin setInterval async)
         polling: false,
         pollAbort: false,
+
+        sending: false,
       }))();
 
       // ============================================================
@@ -690,7 +691,7 @@
         };
 
         function setStatus(t) {
-          if (el.statusEl) el.statusEl.textContent = t;
+          if (el.statusEl) el.statusEl.textContent = t || "";
         }
 
         function escapeHtml(s) {
@@ -729,7 +730,6 @@
           scrollToBottom();
         }
 
-        // ✅ NUEVO: agregar mensaje sin hacer scroll (para render masivo en loadMessages)
         function addMessageNoScroll(role, text) {
           if (!el.chatInner) return;
           const row = document.createElement("div");
@@ -748,6 +748,11 @@
           return typing;
         }
 
+        function setComposerEnabled(enabled) {
+          if (el.input) el.input.disabled = !enabled;
+          if (el.sendBtn) el.sendBtn.disabled = !enabled;
+        }
+
         return {
           el,
           setStatus,
@@ -755,14 +760,15 @@
           autoResize,
           clearChatView,
           addMessage,
-          addMessageNoScroll, // ✅ export nuevo
+          addMessageNoScroll,
           addTyping,
           scrollToBottom,
+          setComposerEnabled,
         };
       })();
 
       // ============================================================
-      // Modal genérico (reutiliza tu modal existente)
+      // Modal genérico
       // ============================================================
       const Modals = (() => {
         const modalBackdrop = document.getElementById("modalBackdrop");
@@ -824,7 +830,7 @@
 
         if (modalInput) {
           modalInput.addEventListener("keydown", (e) => {
-            if (e.key === "Escape") closeModal;
+            if (e.key === "Escape") closeModal();
             if (e.key === "Enter" && !e.shiftKey) modalOk.click();
           });
         }
@@ -839,7 +845,7 @@
           };
         }
 
-        // Modal MCP toggles (encapsulado)
+        // Modal MCP toggles (igual que tu versión; no lo toco aquí)
         function openMcpToggleModal({ project, mcps, onSave }) {
           const selected = new Set(project.mcp_ids || []);
 
@@ -853,36 +859,36 @@
           modal.style.maxWidth = "96vw";
 
           modal.innerHTML = `
-          <div class="modal-head">
-            <div class="modal-title">MCP del proyecto: ${UI.escapeHtml(
-              project.name
-            )}</div>
-            <button class="icon-btn" data-close title="Cerrar">✕</button>
+        <div class="modal-head">
+          <div class="modal-title">MCP del proyecto: ${UI.escapeHtml(
+            project.name
+          )}</div>
+          <button class="icon-btn" data-close title="Cerrar">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <div class="muted" style="font-size:12px">
+            Selecciona qué MCPs estarán asociados a este proyecto.
+            <br/>
+            (Los MCP globalmente inactivos aparecen bloqueados)
           </div>
 
-          <div class="modal-body">
-            <div class="muted" style="font-size:12px">
-              Selecciona qué MCPs estarán asociados a este proyecto.
-              <br/>
-              (Los MCP globalmente inactivos aparecen bloqueados)
-            </div>
-
-            <div style="display:flex; gap:10px; margin-bottom:10px">
-              <input id="mcpSearch" class="modal-input" placeholder="Buscar MCP…" style="flex:1; min-height: 38px" />
-              <button class="btn" id="mcpAll">Todos</button>
-              <button class="btn" id="mcpNone">Ninguno</button>
-            </div>
-
-            <div id="mcpToggleList" style="max-height:360px; overflow:auto; border:1px solid var(--border); border-radius:12px;"></div>
-
-            <div id="mcpErr" class="muted" style="color:#b91c1c; margin-top:10px; display:none;"></div>
+          <div style="display:flex; gap:10px; margin-bottom:10px">
+            <input id="mcpSearch" class="modal-input" placeholder="Buscar MCP…" style="flex:1; min-height: 38px" />
+            <button class="btn" id="mcpAll">Todos</button>
+            <button class="btn" id="mcpNone">Ninguno</button>
           </div>
 
-          <div class="modal-actions">
-            <button class="btn" data-cancel>Cancelar</button>
-            <button class="btn primary" data-save>Guardar</button>
-          </div>
-        `;
+          <div id="mcpToggleList" style="max-height:360px; overflow:auto; border:1px solid var(--border); border-radius:12px;"></div>
+
+          <div id="mcpErr" class="muted" style="color:#b91c1c; margin-top:10px; display:none;"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn" data-cancel>Cancelar</button>
+          <button class="btn primary" data-save>Guardar</button>
+        </div>
+      `;
 
           overlay.appendChild(modal);
           document.body.appendChild(overlay);
@@ -1013,7 +1019,7 @@
       })();
 
       // ============================================================
-      // Render (proyectos, chats, mcps)
+      // Render
       // ============================================================
       const Render = (() => {
         function projects() {
@@ -1161,6 +1167,7 @@
                     await Data.loadMcps();
                     UI.setStatus("Listo");
                     Modals.closeModal();
+                    if (data.warning) alert(data.warning);
                   } catch (e) {
                     UI.setStatus("Error");
                     Modals.showModalError("No se pudo eliminar el MCP.");
@@ -1223,10 +1230,9 @@
       })();
 
       // ============================================================
-      // Chat (mensajes + send + polling)
+      // Chat
       // ============================================================
       const Chat = (() => {
-        // ✅ NUEVO: sleep helper para polling secuencial
         function sleep(ms) {
           return new Promise((r) => setTimeout(r, ms));
         }
@@ -1243,34 +1249,41 @@
           UI.el.chatInner.innerHTML = "";
           if (msgs.length === 0) {
             UI.el.chatInner.innerHTML = `
-          <div class="msg assistant">
-            <div class="bubble muted">Este chat está vacío. Escribe un mensaje abajo.</div>
-          </div>
-        `;
+              <div class="msg assistant">
+                <div class="bubble muted">Este chat está vacío. Escribe un mensaje abajo.</div>
+              </div>
+            `;
           } else {
-            // ✅ CAMBIO: render masivo sin scroll por mensaje
             msgs.forEach((m) => UI.addMessageNoScroll(m.role, m.content));
           }
           UI.scrollToBottom();
+
+          // ✅ Fuente de verdad: state viene del backend
+          const st = data.state || {};
+          State.pendingRunId = st.pending_run_id || null;
+          State.activeRunId = st.active_run_id || null;
+
+          // ✅ Si hay un run activo, reanudar polling automáticamente
+          if (State.activeRunId) {
+            UI.setStatus("Ejecutando…");
+            pollRun(State.activeRunId);
+          } else {
+            UI.setStatus("Listo");
+          }
         }
 
         function stopRunPolling() {
-          // ✅ CAMBIO: además de limpiar timer, aborta loop
           State.pollAbort = true;
           State.polling = false;
-
-          if (State.runPollTimer) clearInterval(State.runPollTimer);
-          State.runPollTimer = null;
           State.activeRunId = null;
         }
 
         async function pollRun(runId) {
-          // ✅ CAMBIO: polling secuencial (sin setInterval async)
-          stopRunPolling(); // mantiene compat (limpia todo)
+          stopRunPolling();
           State.activeRunId = runId;
 
           State.pollAbort = false;
-          if (State.polling) return; // evita doble polling
+          if (State.polling) return;
           State.polling = true;
 
           try {
@@ -1280,33 +1293,25 @@
                 return;
               }
 
-              try {
-                const data = await Api.get(`/api/runs/${runId}`);
-                const st = data?.run?.status || "unknown";
+              const data = await Api.get(`/api/runs/${runId}`);
+              const st = data?.run?.status || data?.status || "unknown";
 
-                // refresca mensajes mientras corre
-                await loadMessages();
+              await loadMessages();
 
-                if (st === "done" || st === "error" || st === "canceled") {
-                  // FLUSH final para atrapar mensajes tardíos
-                  await loadMessages();
-                  await sleep(250);
-                  await loadMessages();
-
-                  stopRunPolling();
-                  UI.setStatus(st === "done" ? "Listo" : "Error");
-                  return;
-                } else {
-                  UI.setStatus(`Ejecutando… (${st})`);
-                }
-              } catch (e) {
+              if (st === "done" || st === "error" || st === "canceled") {
                 stopRunPolling();
-                UI.setStatus("Error");
+                State.pendingRunId = null;
+                UI.setStatus(st === "done" ? "Listo" : "Error");
                 return;
+              } else {
+                UI.setStatus(`Ejecutando… (${st})`);
               }
 
               await sleep(700);
             }
+          } catch (e) {
+            stopRunPolling();
+            UI.setStatus("Error");
           } finally {
             State.polling = false;
           }
@@ -1324,9 +1329,7 @@
             UI.setStatus("Creando chat…");
             const data = await Api.post(
               `/api/projects/${State.selectedProjectId}/chats`,
-              {
-                title: "New chat",
-              }
+              { title: "New chat" }
             );
 
             await Data.loadChats();
@@ -1343,11 +1346,47 @@
         }
 
         async function sendMessage() {
+          if (State.sending) return;
+
           const ok = await ensureChatSelected();
           if (!ok) return;
 
           const text = UI.el.input.value.trim();
           if (!text) return;
+
+          // ✅ Guard perfecto: confirm/cancel sólo si backend dice pending
+          const t = text.toLowerCase().trim();
+          const CONFIRM = new Set([
+            "confirmo",
+            "sí",
+            "si",
+            "ok",
+            "dale",
+            "ejecuta",
+            "proceder",
+            "continuar",
+          ]);
+          const CANCEL = new Set([
+            "cancela",
+            "cancelar",
+            "no",
+            "detener",
+            "para",
+          ]);
+
+          if ((CONFIRM.has(t) || CANCEL.has(t)) && !State.pendingRunId) {
+            UI.addMessage(
+              "assistant",
+              "No hay ningún plan pendiente para confirmar o cancelar."
+            );
+            UI.el.input.value = "";
+            UI.autoResize();
+            UI.setStatus("Listo");
+            return;
+          }
+
+          State.sending = true;
+          UI.setComposerEnabled(false);
 
           UI.addMessage("user", text);
           UI.el.input.value = "";
@@ -1364,17 +1403,17 @@
 
             if (typing) typing.remove();
 
-            // siempre recargamos mensajes: el backend ya agrega la respuesta/plan al chat
             await loadMessages();
             await Data.loadChats();
 
-            //  Arranca polling si el run existe y está queued o running
-            const run = data.run || data; // por si a veces viene plano
-            const st = run.status || "";
+            const run = data.run || data;
+            const runId =
+              run.run_id || data.run_id || data.active_run_id || null;
+            const st = run.status || data.status || "";
 
-            if (data.run_id && (st === "queued" || st === "running")) {
+            if (runId && (st === "queued" || st === "running")) {
               UI.setStatus("Ejecutando…");
-              await pollRun(data.run_id);
+              await pollRun(runId);
             } else {
               UI.setStatus("Listo");
             }
@@ -1390,6 +1429,10 @@
               "assistant",
               "Ocurrió un error enviando el mensaje. Intenta de nuevo."
             );
+          } finally {
+            State.sending = false;
+            UI.setComposerEnabled(true);
+            UI.el.input.focus();
           }
         }
 
@@ -1397,7 +1440,7 @@
       })();
 
       // ============================================================
-      // Actions (botones)
+      // Actions
       // ============================================================
       const Actions = (() => {
         function wire() {
@@ -1441,9 +1484,7 @@
               UI.setStatus("Creando chat…");
               const data = await Api.post(
                 `/api/projects/${State.selectedProjectId}/chats`,
-                {
-                  title: "New chat",
-                }
+                { title: "New chat" }
               );
               await Data.loadChats();
               State.selectedChatId = data.chat.id;
@@ -1535,9 +1576,7 @@
                     UI.setStatus("Guardando contexto…");
                     await Api.patch(
                       `/api/projects/${State.selectedProjectId}`,
-                      {
-                        context: contextText,
-                      }
+                      { context: contextText }
                     );
                     UI.setStatus("Listo");
                     Modals.closeModal();
@@ -1602,6 +1641,8 @@
                   Chat.stopRunPolling();
                   State.selectedProjectId = null;
                   State.selectedChatId = null;
+                  State.pendingRunId = null;
+                  State.activeRunId = null;
 
                   await Data.loadProjects();
                   await Data.loadChats();
@@ -1617,7 +1658,7 @@
             });
           };
 
-          // Enviar
+          // Enviar (click)
           UI.el.sendBtn.onclick = Chat.sendMessage;
 
           // Composer
@@ -1645,7 +1686,7 @@
       })();
 
       // ============================================================
-      // App init
+      // Init
       // ============================================================
       (async function init() {
         try {

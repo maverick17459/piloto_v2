@@ -7,14 +7,14 @@ from typing import Optional, List, Any, Dict
 
 from fastapi import APIRouter, Request, Response
 
+from dataclasses import asdict
+from src.agent.plan_models import PlanRun, PlanStep
+
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from src.app_state import client, store, mcp_store, mcp_service, plan_run_store, settings
-
-
-from dataclasses import asdict
+from src.app_state import client, store, mcp_store, mcp_service, plan_run_store
 
 from src.mcp.invoke_sync import invoke_mcp_sync, MCPCall, MCPInvokeError
 
@@ -33,6 +33,40 @@ templates = Jinja2Templates(directory="src/web/templates")
 
 
 SESSION_COOKIE_NAME = "chat_session_id"
+
+MCP_REQUEST_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "mcp_request",
+        "description": "Execute a request against a connected MCP server",
+        "parameters": {
+            "type": "object",
+            "required": ["mcp_id", "method", "path"],
+            "properties": {
+                "mcp_id": {
+                    "type": "string",
+                    "description": "Target MCP identifier"
+                },
+                "method": {
+                    "type": "string",
+                    "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Endpoint path exposed by the MCP"
+                },
+                "query": {
+                    "type": "object",
+                    "additionalProperties": True
+                },
+                "body": {
+                    "type": ["object", "string", "null"]
+                }
+            },
+            "additionalProperties": False
+        }
+    }
+}
 
 
 # ---------------- Schemas ----------------
@@ -178,52 +212,6 @@ def _build_tools_ctx_for_project(project) -> list[dict]:
     return tools
 
 
-def _router_system_prompt(tools_ctx: list[dict]) -> str:
-    return (
-        "Eres un router de herramientas.\n"
-        "Tienes acceso a servicios MCP descritos en TOOLS.\n"
-        "Tu tarea es decidir y devolver SOLO un JSON (una línea) con la acción.\n\n"
-        "IMPORTANTE:\n"
-        "- Responde SIEMPRE con un JSON válido en UNA SOLA LÍNEA.\n"
-        "- NO uses markdown.\n"
-        "- NO escribas texto fuera del JSON.\n\n"
-        "ACCIONES DISPONIBLES:\n"
-        "1) Responder sin llamar:\n"
-        "{\"action\":\"respond\",\"text\":\"...\"}\n\n"
-        "2) Llamar MCP (un solo paso):\n"
-        "{\"action\":\"mcp_call\",\"mcp_id\":\"...\",\"method\":\"GET|POST|PUT|PATCH|DELETE\",\"path\":\"/...\",\"query\":{...},\"body\":{...}}\n\n"
-        "3) Plan multi-step:\n"
-        "{\"action\":\"plan\",\"goal\":\"...\",\"stop_on_error\":true,\"steps\":["
-        "{\"type\":\"mcp_call\",\"title\":\"...\",\"mcp_id\":\"...\",\"method\":\"POST\",\"path\":\"/command\",\"body\":{\"cmd\":\"...\"}}"
-        "]}\n\n"
-        "REGLA DE ORO:\n"
-        "- Si el usuario pide pasos/secuencia/primero-luego, DEBES devolver action=plan.\n\n"
-        "REGLAS:\n"
-        "- Solo puedes usar mcp_id/method/path que existan en TOOLS.\n"
-        "- No inventes endpoints.\n"
-        "- Si falta info crítica, pide aclaración con action=respond.\n"
-        "- Para comandos usa POST /command con body {\"cmd\":\"...\"}.\n\n"
-        f"TOOLS={json.dumps(tools_ctx, ensure_ascii=False)}"
-    )
-
-
-def _format_plan_for_chat(goal: str, steps_raw: list[dict]) -> str:
-    lines: list[str] = [f"🧠 Te propongo este plan: **{goal}**", ""]
-    for i, s in enumerate(steps_raw, start=1):
-        title = str(s.get("title") or "").strip() or f"Paso {i}"
-        lines.append(f"{i}) {title}")
-        subs = s.get("substeps")
-        if isinstance(subs, list) and subs:
-            for j, ss in enumerate(subs, start=1):
-                st = str(ss.get("title") or "").strip() or f"Subpaso {i}.{j}"
-                lines.append(f"   - {i}.{j} {st}")
-    lines += [
-        "",
-        "Si quieres que lo ejecute paso a paso, responde **confirmo**.",
-        "Si quieres descartarlo, responde **cancela**.",
-    ]
-    return "\n".join(lines)
-
 
 async def _start_run_from_draft(run_id: str, request: Request) -> JSONResponse | dict:
     trace_id = getattr(request.state, "trace_id", request.headers.get("X-Trace-Id", "-"))
@@ -233,14 +221,15 @@ async def _start_run_from_draft(run_id: str, request: Request) -> JSONResponse |
     if not r:
         return JSONResponse({"error": "Run not found"}, status_code=404)
 
-    if r.status != "draft":
-        return JSONResponse({"error": f"Run no está en draft (status={r.status})"}, status_code=409)
+    # Acepta draft o queued:
+    # - draft: flujo viejo (sin CAS)
+    # - queued: flujo nuevo (confirmación ganó CAS y ya marcó queued)
+    if r.status not in ("draft", "queued"):
+        return JSONResponse({"error": f"Run no está listo para iniciar (status={r.status})"}, status_code=409)
 
     plan_dict = r.plan
     if not isinstance(plan_dict, dict):
         return JSONResponse({"error": "Run draft sin plan"}, status_code=500)
-
-    from src.agent.plan_models import PlanRun, PlanStep
 
     def step_from_dict(d: dict) -> PlanStep:
         st = PlanStep(
@@ -272,11 +261,15 @@ async def _start_run_from_draft(run_id: str, request: Request) -> JSONResponse |
     chat = store.get_chat(r.chat_id)
     proj = store.get_project(chat.project_id) if chat else None
 
-    plan_run_store.update(run_id, status="queued", last_event="run_start_queued")
+    # Si aún estaba draft, pásalo a queued. Si ya estaba queued, solo actualiza evento.
+    if r.status == "draft":
+        plan_run_store.update(run_id, status="queued", last_event="run_start_queued")
+    else:
+        plan_run_store.update(run_id, last_event="run_start_queued")
 
     store.add_message(r.chat_id, "assistant", f"Confirmado. Ejecutando plan… (run_id={run_id})")
 
-    # Limpia el pending_run_id y marca active_run_id (si tu store.py ya tiene chat_state)
+    # Limpia pending y marca active
     try:
         store.set_state(r.chat_id, pending_run_id=None, active_run_id=run_id)
     except Exception:
@@ -302,16 +295,42 @@ async def _start_run_from_draft(run_id: str, request: Request) -> JSONResponse |
             t.result()
         except Exception as e:
             log.exception(f"event=plan.bg.task_error run_id={run_id} err={type(e).__name__}: {e}")
+        finally:
+            # Persistir estado final para idempotencia en confirmaciones tardías/duplicadas
+            try:
+                rr = plan_run_store.get(run_id)
+                final_status = rr.status if rr else "unknown"
+            except Exception:
+                final_status = "unknown"
+
+            # IMPORTANTE: no borrar pending_run_id si ya existe un draft nuevo.
+            # Solo limpiar active/pending si siguen apuntando a ESTE run_id.
+            try:
+                st = store.get_state(r.chat_id) or {}
+
+                updates = {
+                    "last_run_id": run_id,
+                    "last_run_status": final_status,
+                    "last_run_ts": int(time.time() * 1000),
+                }
+
+                # Solo limpia active_run_id si ESTE run sigue siendo el activo
+                if st.get("active_run_id") == run_id:
+                    updates["active_run_id"] = None
+
+                # Solo limpia pending_run_id si pending era ESTE run (normalmente ya es None)
+                if st.get("pending_run_id") == run_id:
+                    updates["pending_run_id"] = None
+
+                store.set_state(r.chat_id, **updates)
+            except Exception:
+                pass
+
 
     task.add_done_callback(_on_done)
 
-
-
-
-
-
-
     return {"ok": True, "run_id": run_id, "status": "queued"}
+
 
 
 
@@ -330,9 +349,9 @@ def recover_stale_runs(plan_run_store, store, log):
 
     for r in runs:
         if r.status in ("queued", "running"):
-            log.warning(f"Recovering stale run {r.id} (status={r.status})")
+            log.warning(f"Recovering stale run {r.run_id} (status={r.status})")
             plan_run_store.update(
-                r.id,
+                r.run_id,
                 status="error",
                 last_event="recovered_after_reload",
                 error="Run detenido por recarga del servidor",
@@ -341,10 +360,11 @@ def recover_stale_runs(plan_run_store, store, log):
                 store.add_message(
                     r.chat_id,
                     "assistant",
-                    f"El plan fue detenido por una recarga del servidor.\n(run_id={r.id})",
+                    f"El plan fue detenido por una recarga del servidor.\n(run_id={r.run_id})",
                 )
             except Exception:
                 pass
+
 
 
 
@@ -479,18 +499,11 @@ def api_get_messages(chat_id: str, request: Request):
 
 # ---------------- API: Send ----------------
 
-
 @router.post("/api/send")
 async def api_send(payload: SendMessageIn, request: Request):
     trace_id = getattr(request.state, "trace_id", request.headers.get("X-Trace-Id", "-"))
     log = get_logger(trace_id)
     plog = get_prompt_logger(trace_id)
-
-    log.info(
-        f"event=debug.env LOG_PROMPTS={os.getenv('LOG_PROMPTS')} LOG_DIR={os.getenv('LOG_DIR')} LOG_PROMPT_FILE={os.getenv('LOG_PROMPT_FILE')}"
-    )
-    log.info(f"event=debug.prompts_enabled value={prompts_enabled()}")
-    log.info(f"event=debug.prompt_logger_handlers count={len(plog.logger.handlers)}")
 
     t_total = time.time()
 
@@ -508,10 +521,9 @@ async def api_send(payload: SendMessageIn, request: Request):
         log.info("event=send.reject reason=chat_not_found")
         return JSONResponse({"error": "Chat not found"}, status_code=404)
 
-    # 1) Guardar mensaje usuario
-    store.add_message(chat_id, "user", text)
-
-    # 2) Confirmación por CHAT (si hay plan pendiente)
+    # -------------------------------------------------
+    # 0) Estado actual del chat
+    # -------------------------------------------------
     try:
         state = store.get_state(chat_id)
     except Exception as e:
@@ -520,19 +532,179 @@ async def api_send(payload: SendMessageIn, request: Request):
 
     pending_run_id = state.get("pending_run_id")
     active_run_id = state.get("active_run_id")
-    log.info(f"event=chat.state chat_id={chat_id} pending_run_id={pending_run_id} active_run_id={active_run_id}")
 
+    # extra: idempotencia confirmaciones tardías/duplicadas
+    last_run_id = state.get("last_run_id")
+    last_run_status = state.get("last_run_status")
+    last_run_ts = state.get("last_run_ts")
+
+    log.info(
+        f"event=chat.state chat_id={chat_id} "
+        f"pending_run_id={pending_run_id} active_run_id={active_run_id} "
+        f"last_run_id={last_run_id} last_run_status={last_run_status} last_run_ts={last_run_ts}"
+    )
+
+    # -------------------------------------------------
+    # 1) Guardar mensaje del usuario
+    # -------------------------------------------------
+    store.add_message(chat_id, "user", text)
+
+    # -------------------------------------------------
+    # 2) Confirmación / Cancelación
+    # -------------------------------------------------
+    t = text.lower().strip()
+
+    CONFIRM_WORDS = {"confirmo", "sí", "si", "ok", "dale", "ejecuta", "proceder", "continuar"}
+    CANCEL_WORDS = {"cancela", "cancelar", "no", "detener", "para"}
+
+    is_confirm = t in CONFIRM_WORDS
+    is_cancel = t in CANCEL_WORDS
+
+    # -------------------------------------------------
+    # Guard robusto: confirmaciones fuera de timing
+    # -------------------------------------------------
+    if (is_confirm or is_cancel) and not pending_run_id:
+        # 1) Si hay un run activo
+        if active_run_id:
+            reply = f"Ese plan ya fue confirmado y está en ejecución (run_id={active_run_id})."
+            store.add_message(chat_id, "assistant", reply)
+            store.chat_preview_title(chat_id)
+            log.info(f"event=send.confirmation.late chat_id={chat_id} user_text={t} active_run_id={active_run_id}")
+            log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=confirm_late_active")
+            return {"reply": reply, "active_run_id": active_run_id}
+
+        # 2) Intentar recuperar el último draft del chat
+        recovered_run_id = None
+        try:
+            recovered_run_id = plan_run_store.get_latest_draft_run_id(chat_id)
+        except Exception as e:
+            log.info(f"event=plan.draft.recover.error err={type(e).__name__}")
+
+        if recovered_run_id and is_confirm:
+            log.info(f"event=plan.draft.recovered chat_id={chat_id} run_id={recovered_run_id}")
+
+            # ✅ FIX 1: CAS ANTES de tocar state (evita dejar pending sucio)
+            ok = False
+            try:
+                ok = plan_run_store.try_mark_queued(recovered_run_id)
+            except Exception as e:
+                log.info(f"event=plan.try_mark_queued.error err={type(e).__name__}")
+
+            if not ok:
+                st = None
+                try:
+                    rr = plan_run_store.get(recovered_run_id)
+                    st = rr.status if rr else None
+                except Exception:
+                    pass
+
+                reply = f"Ese plan ya fue confirmado (run_id={recovered_run_id}, estado={st or 'unknown'})."
+                store.add_message(chat_id, "assistant", reply)
+                store.chat_preview_title(chat_id)
+                log.info(
+                    f"event=send.confirmation.idempotent chat_id={chat_id} run_id={recovered_run_id} status={st}"
+                )
+                log.info(
+                    f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=confirm_idempotent_recovered"
+                )
+                return {"reply": reply, "run_id": recovered_run_id, "status": st or "unknown"}
+
+            # ✅ Solo si ganaste CAS, actualiza state y arranca
+            try:
+                store.set_state(chat_id, pending_run_id=recovered_run_id)
+            except Exception as e:
+                log.info(f"event=chat.state.set_pending.error err={type(e).__name__}")
+
+            return await _start_run_from_draft(recovered_run_id, request)
+
+        # 2.5) Idempotencia: confirmación duplicada/tardía reciente
+        now_ms = int(time.time() * 1000)
+        if last_run_id and last_run_ts:
+            try:
+                if (now_ms - int(last_run_ts)) < 120_000:  # 2 min
+                    reply = (
+                        f"Ese plan ya fue confirmado y terminó "
+                        f"(estado={last_run_status}, run_id={last_run_id})."
+                    )
+                    store.add_message(chat_id, "assistant", reply)
+                    store.chat_preview_title(chat_id)
+                    log.info(
+                        f"event=send.confirmation.duplicate chat_id={chat_id} user_text={t} "
+                        f"last_run_id={last_run_id} last_run_status={last_run_status}"
+                    )
+                    log.info(
+                        f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=confirm_duplicate_recent"
+                    )
+                    return {"reply": reply, "run_id": last_run_id, "status": last_run_status}
+            except Exception:
+                pass
+
+        # 3) No hay pending, no hay active, no hay draft recuperable, no hay last reciente
+        reply = "No hay ningún plan pendiente para confirmar o cancelar. Pídeme la acción y te propongo un plan."
+        store.add_message(chat_id, "assistant", reply)
+        store.chat_preview_title(chat_id)
+        log.info(f"event=send.confirmation.orphan chat_id={chat_id} user_text={t}")
+        log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=confirm_orphan")
+        return {"reply": reply}
+
+    # -------------------------------------------------
+    # Confirmación normal: hay pending_run_id
+    # -------------------------------------------------
     if pending_run_id:
-        t = text.lower().strip()
         log.info(f"event=send.confirmation.detected chat_id={chat_id} pending_run_id={pending_run_id} user_text={t}")
 
-        if t in ("confirmo", "sí", "si", "ok", "dale", "ejecuta", "proceder", "continuar"):
+        # ✅ FIX 2: si pending apunta a run inexistente, limpiar y responder claro
+        try:
+            pr = plan_run_store.get(pending_run_id)
+        except Exception:
+            pr = None
+
+        if not pr:
+            try:
+                store.set_state(chat_id, pending_run_id=None)
+            except Exception:
+                pass
+            reply = (
+                "El plan pendiente ya no existe (posible reinicio/limpieza). "
+                "Pídeme la acción de nuevo y te propongo un plan."
+            )
+            store.add_message(chat_id, "assistant", reply)
+            store.chat_preview_title(chat_id)
+            log.info(f"event=send.pending.missing chat_id={chat_id} pending_run_id={pending_run_id}")
+            log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=pending_missing")
+            return {"reply": reply}
+
+        if is_confirm:
+            # CAS: solo el primer confirm pasa draft -> queued
+            ok = False
+            try:
+                ok = plan_run_store.try_mark_queued(pending_run_id)
+            except Exception as e:
+                log.info(f"event=plan.try_mark_queued.error err={type(e).__name__}")
+
+            if not ok:
+                st = None
+                try:
+                    rr = plan_run_store.get(pending_run_id)
+                    st = rr.status if rr else None
+                except Exception:
+                    pass
+
+                reply = f"Ese plan ya fue confirmado (run_id={pending_run_id}, estado={st or 'unknown'})."
+                store.add_message(chat_id, "assistant", reply)
+                store.chat_preview_title(chat_id)
+                log.info(
+                    f"event=send.confirmation.idempotent chat_id={chat_id} run_id={pending_run_id} status={st}"
+                )
+                log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=confirm_idempotent")
+                return {"reply": reply, "run_id": pending_run_id, "status": st or "unknown"}
+
             log.info(f"event=send.confirmation.accept chat_id={chat_id} run_id={pending_run_id}")
             res = await _start_run_from_draft(pending_run_id, request)
             log.info(f"event=send.confirmation.accept.done chat_id={chat_id} run_id={pending_run_id}")
             return res
 
-        if t in ("cancela", "cancelar", "no", "detener", "para"):
+        if is_cancel:
             log.info(f"event=send.confirmation.cancel chat_id={chat_id} run_id={pending_run_id}")
             try:
                 store.set_state(chat_id, pending_run_id=None)
@@ -551,245 +723,234 @@ async def api_send(payload: SendMessageIn, request: Request):
         log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=pending_wait")
         return {"reply": reply, "pending_run_id": pending_run_id}
 
-    # 3) Construcción prompts / router
-    messages_for_llm = store.get_messages_payload(chat_id)
-
-    summ = summarize_messages(messages_for_llm)
-    log.info(
-        f"event=prompt.base.built chat_id={chat_id} msg_count={summ['count']} total_chars={summ['total_chars']} roles={summ['roles']}"
-    )
-    plog.info("event=prompt.base.content\n" + serialize_messages_for_promptlog(messages_for_llm))
+    # -------------------------------------------------
+    # 3) Mensajes para el LLM (sin router)
+    # -------------------------------------------------
+    messages = store.get_messages_payload(chat_id)
+    plog.info("event=prompt.chat.content\n" + serialize_messages_for_promptlog(messages))
 
     proj = store.get_project(c.project_id)
     tools_ctx = _build_tools_ctx_for_project(proj) if proj else []
-    router_sys = _router_system_prompt(tools_ctx)
 
-    log.info(f"event=prompt.router.system chat_id={chat_id} chars={len(router_sys)} mcp_count={len(tools_ctx)}")
-    plog.info("event=prompt.router.system.content\n" + serialize_text_for_promptlog("ROUTER_SYSTEM", router_sys))
+    tools_catalog_system = {
+        "role": "system",
+        "content": (
+            "TOOLS_CATALOG:\n"
+            + json.dumps(tools_ctx, ensure_ascii=False)
+            + "\n\n"
+            "Rules:\n"
+            "- If you call mcp_request, you MUST pick mcp_id/method/path from TOOLS_CATALOG.\n"
+            "- If required info is missing, ask the user instead of guessing.\n"
+            "\n"
+            "Hard rules:\n"
+            "- Decide between (A) a normal chat response and (B) a tool action proposal (mcp_request).\n"
+            "- You MUST produce an mcp_request when the user is asking to DO something that requires an external action/tool, such as:\n"
+            "  executing a command, calling an API endpoint, creating/updating/deleting resources,\n"
+            "  fetching data from an MCP, or actions expressed as: \"haz\", \"ejecuta\", \"corre\", \"llama\",\n"
+            "  \"consulta\", \"crea\", \"actualiza\", \"borra\", \"descarga\", \"sube\", \"abre\", \"revisa\".\n"
+            "- You MUST NOT answer with plain text if the request is actionable via an MCP and all required info is available.\n"
+            "- If the request is actionable but ambiguous or missing required parameters, ask a short clarifying question.\n"
+            "\n"
+            "Command execution rule (/command):\n"
+            "- If the user asks to run or execute a system command, you MUST call mcp_request with method POST and path /command.\n"
+            "- The command MUST be placed in body.cmd as a string (example: {\"cmd\": \"ipconfig\"}).\n"
+            "- Do NOT use any other body shape for /command.\n"
+            "\n"
+            "Catalog constraints:\n"
+            "- Never invent MCPs, tools, methods, or paths that are not present in TOOLS_CATALOG.\n"
+        ),
+    }
 
-    # Para el router: system del router + historial real del chat
-    chat_messages = [{"role": m.role, "content": m.content} for m in c.messages]
-    router_messages = [{"role": "system", "content": router_sys}] + chat_messages
+    llm_messages = [tools_catalog_system] + messages
 
-    rs = summarize_messages(router_messages)
-    log.info(
-        f"event=prompt.router.built chat_id={chat_id} msg_count={rs['count']} total_chars={rs['total_chars']} roles={rs['roles']}"
-    )
-    plog.info("event=prompt.router.content\n" + serialize_messages_for_promptlog(router_messages))
-
-    # 4) Router call
-    t_router = time.time()
+    # -------------------------------------------------
+    # 4) Llamada al modelo con tool-calling (mode=message)
+    # -------------------------------------------------
+    t_llm = time.time()
     try:
-        raw = client.chat(router_messages, temperature=0)
+        msg = client.chat(
+            llm_messages,
+            tools=[MCP_REQUEST_TOOL],
+            tool_choice="auto",
+            temperature=0,
+            mode="message",
+        )
+
+        log.info(
+            "event=llm.response "
+            f"has_tool_calls={bool(msg.get('tool_calls'))} "
+            f"content_len={len(msg.get('content') or '')}"
+        )
+
+        if msg.get("tool_calls"):
+            tc = msg["tool_calls"][0]
+            fn = tc.get("function") or {}
+            log.info(
+                "event=llm.tool_call "
+                f"name={fn.get('name')} "
+                f"has_args={'arguments' in fn} "
+                f"args_type={type(fn.get('arguments')).__name__}"
+            )
+
     except Exception as e:
-        log.info(f"event=router.call.error duration_ms={int((time.time()-t_router)*1000)} err={type(e).__name__}")
+        log.info(f"event=llm.call.error duration_ms={int((time.time()-t_llm)*1000)} err={type(e).__name__}")
         return JSONResponse({"error": f"Error API: {e}"}, status_code=500)
 
-    log.info(f"event=router.call.done duration_ms={int((time.time()-t_router)*1000)} raw_len={len(raw)}")
+    log.info(f"event=llm.call.done duration_ms={int((time.time()-t_llm)*1000)}")
 
-    try:
-        decision = json.loads(raw)
-    except Exception:
-        log.info("event=router.json.parse_error fallback=raw_text")
-        store.add_message(chat_id, "assistant", raw)
-        store.chat_preview_title(chat_id)
-        log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=fallback_text")
-        return {"reply": raw, "warning": "El modelo no devolvió JSON."}
-
-    action = (decision.get("action") or "").strip()
-    log.info(f"event=router.decision.parsed action={action} chat_id={chat_id}")
+    tool_calls = msg.get("tool_calls")
+    content = msg.get("content")
 
     # -----------------------------------------
-    # respond
+    # RESPUESTA NORMAL
     # -----------------------------------------
-    if action == "respond":
-        reply = str(decision.get("text") or "").strip() or "(sin respuesta)"
+    if not tool_calls:
+        log.info("event=decision mode=respond")
+        reply = (content or "").strip() or "(sin respuesta)"
         store.add_message(chat_id, "assistant", reply)
         store.chat_preview_title(chat_id)
         log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=respond")
         return {"reply": reply}
 
     # -----------------------------------------
-    # plan -> DRAFT (confirmación por chat)
+    # TOOL CALL → PLAN DRAFT
     # -----------------------------------------
-    if action == "plan":
-        from dataclasses import asdict
-        from src.agent.plan_models import PlanRun, PlanStep
+    log.info("event=decision mode=tool_call")
 
-        def _parse_step(obj: Dict[str, Any]) -> PlanStep:
-            st = PlanStep(
-                title=str(obj.get("title") or ""),
-                type=str(obj.get("type") or "note"),
-                mcp_id=(obj.get("mcp_id") or None),
-                method=(str(obj.get("method")).upper() if obj.get("method") else None),
-                path=(obj.get("path") or None),
-                query=(obj.get("query") if isinstance(obj.get("query"), dict) else None),
-                body=obj.get("body"),
-            )
-            subs = obj.get("substeps")
-            if isinstance(subs, list):
-                st.substeps = [_parse_step(x) for x in subs if isinstance(x, dict)]
-                if st.substeps and st.type != "subplan":
-                    st.type = "subplan"
-            return st
+    call = tool_calls[0]
+    args = call.get("function", {}).get("arguments")
 
-        goal = str(decision.get("goal") or "").strip() or "Plan"
-        steps_raw = decision.get("steps")
+    log.info(
+        "event=tool.args "
+        f"is_dict={isinstance(args, dict)} "
+        f"preview={str(args)[:200]}"
+    )
 
-        if not isinstance(steps_raw, list) or not steps_raw:
-            reply = "Plan inválido: faltan 'steps'."
-            store.add_message(chat_id, "assistant", reply)
-            store.chat_preview_title(chat_id)
-            log.info("event=plan.reject reason=missing_steps")
-            return {"reply": reply}
-
-        plan = PlanRun(goal=goal, steps=[_parse_step(s) for s in steps_raw if isinstance(s, dict)])
-        if not plan.steps:
-            reply = "Plan inválido: 'steps' no contiene pasos válidos."
-            store.add_message(chat_id, "assistant", reply)
-            store.chat_preview_title(chat_id)
-            log.info("event=plan.reject reason=empty_parsed_steps")
-            return {"reply": reply}
-
-        try:
-            if hasattr(store, "add_plan"):
-                store.add_plan(chat_id, plan)
-            else:
-                cc = store.get_chat(chat_id)
-                if not hasattr(cc, "plan_runs") or cc.plan_runs is None:
-                    cc.plan_runs = []
-                cc.plan_runs.append(plan)
-        except Exception as e:
-            log.info(f"event=plan.store.error err={type(e).__name__}")
-
-        run = plan_run_store.create(chat_id=chat_id, plan_id=plan.id, goal=plan.goal)
-        plan_run_store.update(run.run_id, status="draft", plan=asdict(plan), last_event="plan_draft")
-
-        try:
-            store.set_state(chat_id, pending_run_id=run.run_id)
-        except Exception as e:
-            log.info(f"event=chat.state.set_pending.error err={type(e).__name__}")
-
-        reply = _format_plan_for_chat(goal, steps_raw)
+    if not isinstance(args, dict):
+        reply = "No pude estructurar una acción ejecutable (arguments inválidos)."
         store.add_message(chat_id, "assistant", reply)
         store.chat_preview_title(chat_id)
+        log.info(f"event=tool.args.invalid preview={str(args)[:200]}")
+        return {"reply": reply}
 
-        log.info(f"event=plan.draft chat_id={chat_id} run_id={run.run_id} plan_id={plan.id} steps={len(plan.steps)}")
-        log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=plan_draft run_id={run.run_id}")
+    log.info(f"event=tool.args.valid keys={list(args.keys())}")
 
-        return {"run_id": run.run_id, "status": "draft", "reply": reply}
+    mcp_id = (args.get("mcp_id") or "").strip()
+    method = (args.get("method") or "").strip().upper()
+    path = (args.get("path") or "").strip()
+    query = args.get("query") if isinstance(args.get("query"), dict) else None
+    body = args.get("body")
 
-    # -----------------------------------------
-    # mcp_call -> EJECUTAR ASYNC COMO PLAN (1 paso)
-    # -----------------------------------------
-    if action == "mcp_call":
-        from dataclasses import asdict
-        from src.agent.plan_models import PlanRun, PlanStep
-
-        mcp_id = (decision.get("mcp_id") or "").strip()
-        method = (decision.get("method") or "").strip().upper()
-        path = (decision.get("path") or "").strip()
-        query = decision.get("query") if isinstance(decision.get("query"), dict) else None
-        body = decision.get("body")
-
-        # Normalización específica para /command
-        if method == "POST" and path == "/command":
-            if isinstance(body, dict):
-                if "cmd" not in body and "command" in body:
-                    body["cmd"] = body.pop("command")
-                if "cmd" not in body and "text" in body:
-                    body["cmd"] = body.pop("text")
-            if not isinstance(body, dict) or "cmd" not in body or not str(body["cmd"]).strip():
-                reply = "La llamada a /command requiere body JSON con el campo 'cmd'."
-                store.add_message(chat_id, "assistant", reply)
-                store.chat_preview_title(chat_id)
-                log.info("event=mcp.reject reason=missing_cmd")
-                return {"reply": reply}
-
-        if not (mcp_id and method and path):
-            reply = "La solicitud de herramienta es inválida (faltan campos)."
-            store.add_message(chat_id, "assistant", reply)
-            store.chat_preview_title(chat_id)
-            log.info("event=mcp.reject reason=missing_fields")
-            return {"reply": reply}
-
-        # Validaciones MCP (rápidas)
-        m = mcp_store.get_mcp(mcp_id)
-        if not m or not m.is_active:
-            reply = "El MCP solicitado no existe o está inactivo."
-            store.add_message(chat_id, "assistant", reply)
-            store.chat_preview_title(chat_id)
-            log.info("event=mcp.reject reason=mcp_missing_or_inactive")
-            return {"reply": reply}
-
-        if proj and mcp_id not in (proj.mcp_ids or []):
-            reply = "Ese MCP no está habilitado para este proyecto."
-            store.add_message(chat_id, "assistant", reply)
-            store.chat_preview_title(chat_id)
-            log.info("event=mcp.reject reason=mcp_not_enabled")
-            return {"reply": reply}
-
-        # Convertir a plan de 1 paso y ejecutarlo en background (SIN bloquear el request)
-        goal = f"{method} {path}"
-        step = PlanStep(
-            title=goal,
-            type="mcp_call",
-            mcp_id=mcp_id,
-            method=method,
-            path=path,
-            query=query,
-            body=body,
-        )
-        plan = PlanRun(goal=goal, steps=[step])
-
-        run = plan_run_store.create(chat_id=chat_id, plan_id=plan.id, goal=plan.goal)
-        plan_run_store.update(run.run_id, status="queued", plan=asdict(plan), last_event="run_start_queued")
-
-        # Estado del chat: marcar active_run_id (para que la UI lo sepa si lo usa)
-        try:
-            store.set_state(chat_id, active_run_id=run.run_id)
-        except Exception as e:
-            log.info(f"event=chat.state.set_active.error err={type(e).__name__}")
-
-        # Mensaje inmediato tipo ChatGPT
-        store.add_message(chat_id, "assistant", f"✅ Entendido. Ejecutando… (run_id={run.run_id})")
+    if not (mcp_id and method and path):
+        reply = "La solicitud de herramienta es inválida (faltan campos)."
+        store.add_message(chat_id, "assistant", reply)
         store.chat_preview_title(chat_id)
-
         log.info(
-            f"event=mcp.converted_to_plan chat_id={chat_id} run_id={run.run_id} mcp_id={mcp_id} method={method} path={path}"
+            "event=tool.reject reason=missing_fields "
+            f"mcp_id={bool(mcp_id)} method={bool(method)} path={bool(path)}"
         )
+        return {"reply": reply}
 
-        # Lanzar task
-        try:
-            asyncio.create_task(
-                run_plan_in_background(
-                    run_id=run.run_id,
-                    chat_id=chat_id,
-                    plan=plan,
-                    store=store,
-                    mcp_store=mcp_store,
-                    proj=proj,
-                    trace_id=trace_id,
-                    log=log,
-                    run_store=plan_run_store,
-                    client=client,
-                )
+    log.info(f"event=plan.create mcp_id={mcp_id} method={method} path={path}")
+
+    m = mcp_store.get_mcp(mcp_id)
+    if not m or not m.is_active:
+        reply = "El MCP solicitado no existe o está inactivo."
+        store.add_message(chat_id, "assistant", reply)
+        store.chat_preview_title(chat_id)
+        log.info("event=mcp.reject reason=mcp_missing_or_inactive")
+        return {"reply": reply}
+
+    if proj and mcp_id not in (proj.mcp_ids or []):
+        reply = "Ese MCP no está habilitado para este proyecto."
+        store.add_message(chat_id, "assistant", reply)
+        store.chat_preview_title(chat_id)
+        log.info("event=mcp.reject reason=mcp_not_enabled")
+        return {"reply": reply}
+
+    # Normalización específica para /command
+    if method == "POST" and path == "/command":
+        if isinstance(body, str) and body.strip():
+            s = body.strip()
+            if (s.startswith("{") and s.endswith("}")) or (s.startswith('{"') and s.endswith('"}')):
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, dict):
+                        body = parsed
+                    else:
+                        body = {"cmd": s}
+                except Exception:
+                    body = {"cmd": s}
+            else:
+                body = {"cmd": s}
+
+        if isinstance(body, dict):
+            if "cmd" not in body and "command" in body:
+                body["cmd"] = body.pop("command")
+            if "cmd" not in body and "text" in body:
+                body["cmd"] = body.pop("text")
+
+            log.info(
+                "event=command.body.normalized "
+                f"body_type={type(body).__name__} "
+                f"has_cmd={isinstance(body, dict) and 'cmd' in body} "
+                f"cmd_preview={(body.get('cmd')[:120] if isinstance(body, dict) and isinstance(body.get('cmd'), str) else '')}"
             )
-            log.info(f"event=bg.task.created chat_id={chat_id} run_id={run.run_id}")
-        except Exception as e:
-            log.info(f"event=bg.task.create_error err={type(e).__name__}")
-            plan_run_store.update(run.run_id, status="error", error=f"{type(e).__name__}: {e}", last_event="bg_create_error")
-            store.add_message(chat_id, "assistant", f"❌ No pude iniciar la ejecución en background: {e}")
+
+        if not isinstance(body, dict) or "cmd" not in body or not str(body["cmd"]).strip():
+            reply = "La llamada a /command requiere body con el campo 'cmd'."
+            store.add_message(chat_id, "assistant", reply)
             store.chat_preview_title(chat_id)
+            log.info("event=mcp.reject reason=missing_cmd")
+            return {"reply": reply}
 
-        log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=mcp_call_async run_id={run.run_id}")
-        return {"ok": True, "run_id": run.run_id, "status": "queued"}
+    goal = f"{method} {path}"
 
-    reply = "Respuesta inválida del modelo (action desconocida)."
+    step = PlanStep(
+        title=goal,
+        type="mcp_call",
+        mcp_id=mcp_id,
+        method=method,
+        path=path,
+        query=query,
+        body=body,
+    )
+
+    plan = PlanRun(goal=goal, steps=[step])
+
+    run = plan_run_store.create(chat_id=chat_id, plan_id=plan.id, goal=plan.goal)
+    plan_run_store.update(
+        run.run_id,
+        status="draft",
+        plan=asdict(plan),
+        last_event="plan_draft",
+    )
+
+    try:
+        store.set_state(chat_id, pending_run_id=run.run_id)
+    except Exception as e:
+        log.info(f"event=chat.state.set_pending.error err={type(e).__name__}")
+
+    reply = (
+        f"📌 **Plan propuesto**\n"
+        f"- MCP: `{mcp_id}`\n"
+        f"- Acción: `{method} {path}`\n\n"
+        f"Responde **confirmo** para ejecutarlo o **cancela** para descartarlo."
+    )
+
     store.add_message(chat_id, "assistant", reply)
     store.chat_preview_title(chat_id)
-    log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=unknown_action action={action}")
-    return {"reply": reply}
+
+    log.info(
+        f"event=plan.draft chat_id={chat_id} run_id={run.run_id} "
+        f"method={method} path={path} mcp_id={mcp_id}"
+    )
+    log.info(
+        f"event=send.done duration_ms={int((time.time()-t_total)*1000)} "
+        f"mode=plan_draft run_id={run.run_id}"
+    )
+
+    return {"run_id": run.run_id, "status": "draft", "reply": reply}
 
 
 
@@ -943,69 +1104,27 @@ async def api_start_run(run_id: str, request: Request):
     if not r:
         return JSONResponse({"error": "Run not found"}, status_code=404)
 
+    # Idempotencia: si ya está en queued/running/done/error, no re-ejecutar
+    if r.status in ("queued", "running"):
+        return {"ok": True, "run_id": run_id, "status": r.status}
+    if r.status in ("done", "error", "canceled"):
+        return {"ok": True, "run_id": run_id, "status": r.status}
+
+    # Solo draft puede arrancar
     if r.status != "draft":
-        return JSONResponse({"error": f"Run no está en draft (status={r.status})"}, status_code=409)
+        return {"ok": True, "run_id": run_id, "status": r.status}
 
-    plan_dict = r.plan
-    if not isinstance(plan_dict, dict):
-        return JSONResponse({"error": "Run draft sin plan"}, status_code=500)
-
-    from src.agent.plan_models import PlanRun, PlanStep
-
-    def step_from_dict(d: dict) -> PlanStep:
-        st = PlanStep(
-            title=d.get("title", ""),
-            type=d.get("type", "note"),
-            mcp_id=d.get("mcp_id"),
-            method=d.get("method"),
-            path=d.get("path"),
-            query=d.get("query"),
-            body=d.get("body"),
-        )
-        subs = d.get("substeps")
-        if isinstance(subs, list):
-            st.substeps = [step_from_dict(x) for x in subs if isinstance(x, dict)]
-            if st.substeps and st.type != "subplan":
-                st.type = "subplan"
-        return st
-
-    plan = PlanRun(
-        goal=plan_dict.get("goal", "Plan"),
-        steps=[step_from_dict(s) for s in (plan_dict.get("steps") or []) if isinstance(s, dict)],
-    )
-    if "id" in plan_dict:
-        plan.id = str(plan_dict["id"])
-
-    chat = store.get_chat(r.chat_id)
-    proj = store.get_project(chat.project_id) if chat else None
-
-
-    plan_run_store.update(run_id, status="queued", plan=plan_dict, last_event="run_start_queued")
-
-
-    store.add_message(r.chat_id, "assistant", f"Confirmado. Ejecutando plan… (run_id={run_id})")
-
+    # CAS: draft -> queued (solo una vez)
     try:
-        store.set_state(r.chat_id, pending_run_id=None, active_run_id=run_id)
-    except Exception:
-        pass
+        ok = plan_run_store.try_mark_queued(run_id)  # debes tener este método
+    except Exception as e:
+        ok = False
+        log.info(f"event=plan.try_mark_queued.error run_id={run_id} err={type(e).__name__}")
 
+    if not ok:
+        rr = plan_run_store.get(run_id)
+        st = rr.status if rr else "unknown"
+        return {"ok": True, "run_id": run_id, "status": st}
 
-    asyncio.create_task(
-        run_plan_in_background(
-            run_id=run_id,
-            chat_id=r.chat_id,
-            plan=plan,
-            store=store,
-            mcp_store=mcp_store,
-            proj=proj,
-            trace_id=trace_id,
-            log=log,
-            run_store=plan_run_store,
-            client=client,  # <-- usa el cliente global correcto
-        )
-    )
-
-    return {"ok": True, "run_id": run_id, "status": "queued"}
-
-
+    # Reutiliza el flujo único (crea task + set_state + mensajes + on_done etc.)
+    return await _start_run_from_draft(run_id, request)
