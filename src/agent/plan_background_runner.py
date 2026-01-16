@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import time
+import json
 from dataclasses import asdict
 from typing import Any, Dict, Optional, Protocol
 
 from src.agent.plan_models import PlanRun, PlanStep
 from src.agent.plan_executor import execute_plan_run
-
 from src.agent.agent_reasoner import reason_about_command_failure
-
 from src.mcp.invoke_sync import MCPCall, invoke_mcp_sync, MCPInvokeError
 
 
@@ -128,13 +127,21 @@ async def run_plan_in_background(
             e,
         )
 
-
-
     loop = asyncio.get_running_loop()
 
     # -----------------------------
     # helpers thread-safe
     # -----------------------------
+
+    def _ui_envelope(kind: str, payload: dict) -> str:
+        """
+        Sobre UI versionado para que el frontend renderice cards y bloques pre/code
+        sin depender de Markdown.
+        """
+        return "PILOTO_MSG_V1\n" + json.dumps(
+            {"v": 1, "kind": kind, **payload},
+            ensure_ascii=False,
+        )
 
     def _safe_call(fn, *args, **kwargs):
         try:
@@ -160,7 +167,21 @@ async def run_plan_in_background(
 
     run_store.update(run_id, last_event="run_start", current_step_path=None)
     log.info(f"event=runner.start run_id={run_id} chat_id={chat_id} goal={plan.goal}")
-    safe_add_message("assistant", f"⏳ Iniciando plan: {plan.goal}\n(run_id={run_id})")
+
+    # Mensaje de inicio (estructurado)
+    safe_add_message(
+        "assistant",
+        _ui_envelope(
+            "run_start",
+            {
+                "run_id": run_id,
+                "goal": plan.goal,
+                "chat_id": chat_id,
+                "trace_id": trace_id,
+                "ts_ms": _now_ms(),
+            },
+        ),
+    )
 
     # -----------------------------
     # validación de pasos
@@ -175,29 +196,23 @@ async def run_plan_in_background(
         return None
 
     # -----------------------------
-    # eventos UX
+    # eventos UX (AHORA ESTRUCTURADOS)
     # -----------------------------
 
-    def emit(kind: str, step_path: Optional[str], title: str, detail: Optional[str] = None):
+    def emit(kind: str, step_path: Optional[str], title: str, payload: Optional[dict] = None):
         run_store.update(run_id, current_step_path=step_path, last_event=kind)
 
-        if kind == "step_start":
-            safe_add_message("assistant", f"⏳ {step_path}: {title}")
-        elif kind == "step_ok":
-            msg = f"✅ {step_path}: {title}"
-            if detail:
-                msg += f"\n{detail}"
-            safe_add_message("assistant", msg)
-        elif kind == "step_err":
-            msg = f"❌ {step_path}: {title}"
-            if detail:
-                msg += f"\n{detail}"
-            safe_add_message("assistant", msg)
-        elif kind == "step_retry":
-            msg = f"⚠️ {step_path}: {title}"
-            if detail:
-                msg += f"\n{detail}"
-            safe_add_message("assistant", msg)
+        p = {
+            "run_id": run_id,
+            "goal": plan.goal,
+            "step_path": step_path,
+            "title": title,
+            "ts_ms": _now_ms(),
+        }
+        if payload:
+            p.update(payload)
+
+        safe_add_message("assistant", _ui_envelope(kind, p))
 
     # -----------------------------
     # invoke MCP (centralizado)
@@ -245,10 +260,25 @@ async def run_plan_in_background(
         query: Optional[Dict[str, Any]],
         body: Any,
     ):
+        # Ojo: step_path es lo que se mostrará en UI; en tu plan executor probablemente ya tienes un path real.
+        # Aquí mantenemos el comportamiento original (path), pero añadimos más contexto en el payload.
         step_path = path or "step"
         title = f"{method} {path}"
 
-        emit("step_start", step_path, title)
+        # Inicio del paso con request completo (sin stringify)
+        emit(
+            "step_start",
+            step_path,
+            title,
+            payload={
+                "mcp_id": mcp_id,
+                "method": method,
+                "path": path,
+                "query": query,
+                "body": body,
+                "attempt": 1,
+            },
+        )
 
         attempt = 1
         current_body = body
@@ -256,19 +286,76 @@ async def run_plan_in_background(
         while True:
             sc, res = invoke_step(mcp_id, method, path, query, current_body)
 
+            # Error HTTP / MCP
             if not (200 <= int(sc) < 300):
-                emit("step_err", step_path, title, _short(res))
+                emit(
+                    "step_err",
+                    step_path,
+                    title,
+                    payload={
+                        "mcp_id": mcp_id,
+                        "method": method,
+                        "path": path,
+                        "query": query,
+                        "body": current_body,
+                        "attempt": attempt,
+                        "status_code": int(sc),
+                        "response": res,
+                        "detail": _short(res),
+                    },
+                )
                 return sc, res
 
+            # Caso /command: definimos éxito real por payload
             if _is_command_call(method, path):
                 failed, reason = _command_failed(res)
+
+                # OK real
                 if not failed:
-                    emit("step_ok", step_path, title, _short(res))
+                    emit(
+                        "step_ok",
+                        step_path,
+                        title,
+                        payload={
+                            "mcp_id": mcp_id,
+                            "method": method,
+                            "path": path,
+                            "query": query,
+                            "body": current_body,
+                            "attempt": attempt,
+                            "status_code": int(sc),
+                            "response": res,
+                            "stdout": res.get("stdout") if isinstance(res, dict) else None,
+                            "stderr": res.get("stderr") if isinstance(res, dict) else None,
+                            "exit_code": res.get("exit_code") if isinstance(res, dict) else None,
+                            "status": res.get("status") if isinstance(res, dict) else None,
+                        },
+                    )
                     return sc, res
 
+                # FALLÓ: si ya no hay más intentos directos, invocamos reasoner para un nuevo cuerpo
                 if attempt >= MAX_ATTEMPTS_PER_COMMAND_STEP:
-                    stdout = str(res.get("stdout") or "")
-                    stderr = str(res.get("stderr") or "")
+                    stdout = str(res.get("stdout") or "") if isinstance(res, dict) else ""
+                    stderr = str(res.get("stderr") or "") if isinstance(res, dict) else ""
+
+                    # Motivo de fallo + último payload recibido
+                    emit(
+                        "step_retry",
+                        step_path,
+                        title,
+                        payload={
+                            "mcp_id": mcp_id,
+                            "method": method,
+                            "path": path,
+                            "query": query,
+                            "body": current_body,
+                            "attempt": attempt,
+                            "status_code": int(sc),
+                            "response": res,
+                            "reason": reason,
+                            "detail": "Invocando agente reasoner para proponer un nuevo intento razonado.",
+                        },
+                    )
 
                     new_step = reason_about_command_failure(
                         client=client,
@@ -288,31 +375,85 @@ async def run_plan_in_background(
                         max_attempts=MAX_ATTEMPTS_PER_COMMAND_STEP,
                     )
 
-                    if not new_step or _looks_dangerous(new_step.body.get("cmd", "")):
-                        emit("step_err", step_path, title, reason)
+                    # Si no hay propuesta o es peligrosa: error final
+                    if not new_step or _looks_dangerous((new_step.body or {}).get("cmd", "")):
+                        emit(
+                            "step_err",
+                            step_path,
+                            title,
+                            payload={
+                                "mcp_id": mcp_id,
+                                "method": method,
+                                "path": path,
+                                "query": query,
+                                "body": current_body,
+                                "attempt": attempt,
+                                "status_code": int(sc),
+                                "response": res,
+                                "stdout": stdout,
+                                "stderr": stderr,
+                                "reason": reason,
+                                "detail": "El comando falló y el agente no pudo proponer un retry seguro.",
+                            },
+                        )
                         return sc, res
 
+                    # Aplicamos retry razonado (nuevo body)
                     attempt += 1
                     current_body = new_step.body
+
                     emit(
                         "step_retry",
                         step_path,
                         title,
-                        "El agente propone un nuevo intento razonado.",
+                        payload={
+                            "mcp_id": mcp_id,
+                            "method": method,
+                            "path": path,
+                            "query": query,
+                            "attempt": attempt,
+                            "new_body": current_body,
+                            "detail": "El agente propone un nuevo intento razonado.",
+                        },
                     )
                     continue
 
+                # Reintento simple (sin reasoner aún)
                 attempt += 1
                 emit(
                     "step_retry",
                     step_path,
                     title,
-                    f"Reintentando comando ({attempt}/{MAX_ATTEMPTS_PER_COMMAND_STEP})",
+                    payload={
+                        "mcp_id": mcp_id,
+                        "method": method,
+                        "path": path,
+                        "query": query,
+                        "attempt": attempt,
+                        "status_code": int(sc),
+                        "response": res,
+                        "reason": reason,
+                        "detail": f"Reintentando comando ({attempt}/{MAX_ATTEMPTS_PER_COMMAND_STEP})",
+                    },
                 )
                 continue
 
             # llamadas MCP no /command
-            emit("step_ok", step_path, title, _short(res))
+            emit(
+                "step_ok",
+                step_path,
+                title,
+                payload={
+                    "mcp_id": mcp_id,
+                    "method": method,
+                    "path": path,
+                    "query": query,
+                    "body": current_body,
+                    "attempt": attempt,
+                    "status_code": int(sc),
+                    "response": res,
+                },
+            )
             return sc, res
 
     # -----------------------------
@@ -340,26 +481,69 @@ async def run_plan_in_background(
             last_event="run_done",
         )
 
+        # Mensaje final estructurado (para card/summary)
         safe_add_message(
             "assistant",
-            f"Plan '{final_plan.goal}' finalizado con estado: {final_plan.status}. "
-            f"Último paso: {final_plan.current_step_path or '-'}",
+            _ui_envelope(
+                "run_done",
+                {
+                    "run_id": run_id,
+                    "goal": final_plan.goal,
+                    "status": final_plan.status,
+                    "final_status": final_status,
+                    "current_step_path": final_plan.current_step_path or None,
+                    "ts_ms": _now_ms(),
+                },
+            ),
         )
 
         log.info(f"event=runner.finish run_id={run_id} status={final_status}")
 
     except asyncio.TimeoutError:
         run_store.update(run_id, status="error", error="TimeoutError: plan_timeout", last_event="run_timeout")
-        safe_add_message("assistant", f"⏱️ El plan excedió el tiempo máximo y fue detenido.\n(run_id={run_id})")
+        safe_add_message(
+            "assistant",
+            _ui_envelope(
+                "run_timeout",
+                {
+                    "run_id": run_id,
+                    "goal": plan.goal,
+                    "error": "TimeoutError: plan_timeout",
+                    "ts_ms": _now_ms(),
+                },
+            ),
+        )
 
     except asyncio.CancelledError:
         run_store.update(run_id, status="error", error="CancelledError", last_event="runner_cancelled")
-        safe_add_message("assistant", f"⚠️ Ejecución cancelada.\n(run_id={run_id})")
+        safe_add_message(
+            "assistant",
+            _ui_envelope(
+                "run_cancelled",
+                {
+                    "run_id": run_id,
+                    "goal": plan.goal,
+                    "error": "CancelledError",
+                    "ts_ms": _now_ms(),
+                },
+            ),
+        )
         raise
 
     except Exception as e:
         run_store.update(run_id, status="error", error=str(e), last_event="run_error")
-        safe_add_message("assistant", f"❌ Error ejecutando plan: {e}")
+        safe_add_message(
+            "assistant",
+            _ui_envelope(
+                "run_error",
+                {
+                    "run_id": run_id,
+                    "goal": plan.goal,
+                    "error": f"{type(e).__name__}: {e}",
+                    "ts_ms": _now_ms(),
+                },
+            ),
+        )
 
     finally:
         # Estado final del run (para idempotencia y para evitar "pisar" drafts nuevos)
@@ -384,7 +568,7 @@ async def run_plan_in_background(
             updates = {
                 "last_run_id": run_id,
                 "last_run_status": final_status,
-                "last_run_ts": _now_ms(),   
+                "last_run_ts": _now_ms(),
             }
 
             # Solo limpia active_run_id si este run sigue siendo el activo
@@ -417,5 +601,3 @@ async def run_plan_in_background(
                 type(e).__name__,
                 e,
             )
-
-

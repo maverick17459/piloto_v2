@@ -184,6 +184,21 @@ def index(request: Request, response: Response):
 
 # ---------------- Helpers ----------------
 
+def make_plan_proposed_ui(run, steps, confirm_hint: str):
+    return "PILOTO_MSG_V1\n" + json.dumps(
+        {
+            "v": 1,
+            "kind": "plan_proposed",
+            "run_id": run.run_id,
+            "goal": run.goal,
+            "steps": steps,
+            "confirm_hint": confirm_hint,
+        },
+        ensure_ascii=False,
+    )
+
+
+
 def _looks_like_plan_text(text: str) -> bool:
     """
     Detecta cuando el MODELO escribió un 'plan' en texto (anti-plan-fantasma).
@@ -677,15 +692,22 @@ async def api_send(payload: SendMessageIn, request: Request):
 
         store.set_state(chat_id, pending_run_id=run.run_id)
 
-        reply = (
-            f"📌 **Plan propuesto**\n"
-            f"- MCP: `{mcp_id_cmd}`\n"
-            f"- Acción: `{method} {path}`\n\n"
-            f"Comando: `{cmd}`\n\n"
-            f"Responde **confirmo** para ejecutarlo o **cancela** para descartarlo."
+        steps = [{
+            "mcp_id": mcp_id_cmd,
+            "method": method,
+            "path": path,
+            "query": None,
+            "body": body,
+        }]
+
+        reply = make_plan_proposed_ui(
+            run,
+            steps,
+            "Responde confirmo para ejecutarlo o cancela para descartarlo.",
         )
 
         store.add_message(chat_id, "assistant", reply)
+
         store.chat_preview_title(chat_id)
         log.info(f"event=plan.draft.fastpath chat_id={chat_id} run_id={run.run_id} cmd={cmd}")
 
@@ -1152,11 +1174,20 @@ async def api_send(payload: SendMessageIn, request: Request):
     except Exception as e:
         log.info(f"event=chat.state.set_pending.error err={type(e).__name__}")
 
-    reply = (
-        f"📌 **Plan propuesto**\n"
-        f"- MCP: `{mcp_id}`\n"
-        f"- Acción: `{method} {path}`\n\n"
-        f"Responde **confirmo** para ejecutarlo o **cancela** para descartarlo."
+    steps = []
+    for s in plan.steps:
+        steps.append({
+            "mcp_id": s.mcp_id,
+            "method": s.method,
+            "path": s.path,
+            "query": s.query,
+            "body": s.body,
+        })
+
+    reply = make_plan_proposed_ui(
+        run,
+        steps,
+        "Confirma para ejecutar el plan o cancela para descartarlo.",
     )
 
     store.add_message(chat_id, "assistant", reply)
@@ -1171,8 +1202,7 @@ async def api_send(payload: SendMessageIn, request: Request):
         f"mode=plan_draft run_id={run.run_id}"
     )
 
-    return {"run_id": run.run_id, "status": "draft", "reply": reply}
-
+    return {"run_id": run.run_id, "status": "draft", "reply": re}
 
 
 # ---------------- MCP Routes ----------------

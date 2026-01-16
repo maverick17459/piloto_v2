@@ -701,6 +701,16 @@
             .replaceAll(">", "&gt;");
         }
 
+        function parseUiEnvelope(text) {
+          if (!text || typeof text !== "string") return null;
+          if (!text.startsWith("PILOTO_MSG_V1\n")) return null;
+          try {
+            return JSON.parse(text.slice("PILOTO_MSG_V1\n".length));
+          } catch {
+            return null;
+          }
+        }
+
         function autoResize() {
           if (!el.input) return;
           el.input.style.height = "auto";
@@ -715,26 +725,42 @@
         function clearChatView() {
           if (!el.chatInner) return;
           el.chatInner.innerHTML = `
-        <div class="msg assistant">
-          <div class="bubble muted">Selecciona un chat para ver el historial.</div>
-        </div>
-      `;
+            <div class="msg assistant">
+              <div class="bubble muted">Selecciona un chat para ver el historial.</div>
+            </div>
+          `;
         }
 
         function addMessage(role, text) {
           if (!el.chatInner) return;
+
           const row = document.createElement("div");
           row.className = `msg ${role === "user" ? "user" : "assistant"}`;
-          row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+
+          const ui = parseUiEnvelope(text);
+          if (ui) {
+            row.appendChild(renderUiMessage(ui));
+          } else {
+            row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+          }
+
           el.chatInner.appendChild(row);
           scrollToBottom();
         }
 
         function addMessageNoScroll(role, text) {
           if (!el.chatInner) return;
+
           const row = document.createElement("div");
           row.className = `msg ${role === "user" ? "user" : "assistant"}`;
-          row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+
+          const ui = parseUiEnvelope(text);
+          if (ui) {
+            row.appendChild(renderUiMessage(ui));
+          } else {
+            row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+          }
+
           el.chatInner.appendChild(row);
         }
 
@@ -751,6 +777,273 @@
         function setComposerEnabled(enabled) {
           if (el.input) el.input.disabled = !enabled;
           if (el.sendBtn) el.sendBtn.disabled = !enabled;
+        }
+
+        function titleForKind(kind) {
+          switch (kind) {
+            case "plan_proposed":
+              return "📌 Plan propuesto";
+            case "step_start":
+              return "⏳ Paso iniciado";
+            case "step_ok":
+              return "✅ Paso completado";
+            case "step_err":
+              return "❌ Error en paso";
+            case "step_retry":
+              return "⚠️ Reintento";
+            case "run_start":
+              return "▶️ Ejecución iniciada";
+            case "run_done":
+              return "🏁 Ejecución finalizada";
+            case "run_error":
+              return "❌ Ejecución fallida";
+            default:
+              return kind || "Evento";
+          }
+        }
+
+        function el_(tag, attrs = {}, children = []) {
+          const n = document.createElement(tag);
+          for (const [k, v] of Object.entries(attrs)) {
+            if (k === "class") n.className = v;
+            else if (k === "text") n.textContent = v;
+            else n.setAttribute(k, v);
+          }
+          for (const c of children) n.appendChild(c);
+          return n;
+        }
+
+        function strong(text) {
+          return el_("strong", { text });
+        }
+        function codeInline(text) {
+          return el_("code", { text });
+        }
+
+        function preBlock(text) {
+          const pre = document.createElement("pre");
+          pre.textContent = text ?? "";
+          pre.style.margin = "6px 0 0";
+          pre.style.padding = "10px 12px";
+          pre.style.border = "1px solid var(--border)";
+          pre.style.borderRadius = "12px";
+          pre.style.background = "var(--soft2)";
+          pre.style.overflow = "auto";
+          pre.style.whiteSpace = "pre";
+          pre.style.fontSize = "13px";
+          return pre;
+        }
+
+        function pretty(obj) {
+          try {
+            return JSON.stringify(obj, null, 2);
+          } catch {
+            return String(obj);
+          }
+        }
+
+        function detailsBlock(summaryText, contentNode) {
+          const d = document.createElement("details");
+          const s = document.createElement("summary");
+          s.textContent = summaryText;
+          s.style.cursor = "pointer";
+          s.style.userSelect = "none";
+          d.appendChild(s);
+          d.appendChild(contentNode);
+          d.style.marginTop = "8px";
+          return d;
+        }
+
+        function renderPlanProposed(m) {
+          const box = document.createElement("div");
+          box.className = "bubble";
+
+          box.appendChild(el_("div", {}, [strong("📌 Plan propuesto")]));
+          if (m.goal)
+            box.appendChild(el_("div", { text: `Objetivo: ${m.goal}` }));
+
+          const steps = Array.isArray(m.steps) ? m.steps : [];
+          steps.forEach((s, idx) => {
+            const line = document.createElement("div");
+            line.style.marginTop = "10px";
+
+            const mcpLabel = s.mcp_name
+              ? `${s.mcp_name} (${s.mcp_id || ""})`
+              : s.mcp_id || "";
+            line.appendChild(strong(`Paso ${idx + 1}: `));
+            line.appendChild(
+              codeInline(`${(s.method || "").toUpperCase()} ${s.path || ""}`)
+            );
+
+            if (mcpLabel) {
+              const mcpLine = document.createElement("div");
+              mcpLine.appendChild(strong("MCP: "));
+              mcpLine.appendChild(document.createTextNode(mcpLabel));
+              mcpLine.style.marginTop = "4px";
+              box.appendChild(mcpLine);
+            }
+
+            box.appendChild(line);
+
+            // Mostrar el comando como GPT (texto), no JSON crudo
+            // Caso típico /command: body = { cmd: "..." }
+            if (s.body && typeof s.body === "object" && s.body.cmd) {
+              const cmdLine = document.createElement("div");
+              cmdLine.style.marginTop = "6px";
+              cmdLine.appendChild(strong("Comando: "));
+              cmdLine.appendChild(codeInline(s.body.cmd));
+              box.appendChild(cmdLine);
+            }
+
+            // Detalles técnicos colapsables (body/query completos)
+            const tech = [];
+            if (s.query) tech.push(`query:\n${pretty(s.query)}`);
+            if (s.body) tech.push(`body:\n${pretty(s.body)}`);
+            if (tech.length)
+              box.appendChild(
+                detailsBlock("Detalles", preBlock(tech.join("\n\n")))
+              );
+          });
+
+          if (m.confirm_hint) {
+            const hint = document.createElement("div");
+            hint.style.marginTop = "10px";
+            hint.appendChild(strong(m.confirm_hint));
+            box.appendChild(hint);
+          }
+
+          return box;
+        }
+
+        function renderStepResult(m, ok) {
+          const box = document.createElement("div");
+          box.className = "bubble";
+
+          box.appendChild(
+            el_("div", {}, [strong(ok ? "✅ Resultado" : "❌ Error")])
+          );
+
+          const mcpLabel = m.mcp_name
+            ? `${m.mcp_name} (${m.mcp_id || ""})`
+            : m.mcp_id || "";
+          if (mcpLabel) {
+            const mcpLine = document.createElement("div");
+            mcpLine.appendChild(strong("MCP: "));
+            mcpLine.appendChild(document.createTextNode(mcpLabel));
+            box.appendChild(mcpLine);
+          }
+
+          if (m.method && m.path) {
+            const ep = document.createElement("div");
+            ep.appendChild(strong("Endpoint: "));
+            ep.appendChild(
+              codeInline(`${String(m.method).toUpperCase()} ${m.path}`)
+            );
+            box.appendChild(ep);
+          }
+
+          // Caso /command: muestra stdout/stderr como ChatGPT
+          if (m.stdout) {
+            box.appendChild(el_("div", { text: "Salida (stdout):" }));
+            box.appendChild(preBlock(String(m.stdout)));
+          }
+          if (m.stderr) {
+            box.appendChild(el_("div", { text: "Errores (stderr):" }));
+            box.appendChild(preBlock(String(m.stderr)));
+          }
+
+          // Si no hay stdout/stderr, muestra una síntesis human-readable:
+          if (!m.stdout && !m.stderr && m.response != null) {
+            // intenta mensaje simple
+            const txt = typeof m.response === "string" ? m.response : null;
+            if (txt) box.appendChild(el_("div", { text: txt }));
+            // y detalles colapsables
+            box.appendChild(
+              detailsBlock("Detalles", preBlock(pretty(m.response)))
+            );
+          }
+
+          // Siempre: detalles técnicos opcionales
+          if (m.body || m.query || m.response) {
+            const tech = [];
+            if (m.query) tech.push(`query:\n${pretty(m.query)}`);
+            if (m.body) tech.push(`body:\n${pretty(m.body)}`);
+            if (m.response) tech.push(`response:\n${pretty(m.response)}`);
+            box.appendChild(
+              detailsBlock("Ver JSON", preBlock(tech.join("\n\n")))
+            );
+          }
+
+          return box;
+        }
+
+        function renderStepStart(model) {
+          const box = document.createElement("div");
+          box.className = "bubble";
+          box.appendChild(el_("div", {}, [strong("⏳ Ejecutando…")]));
+
+          const mcpLabel = model.mcp_name
+            ? `${model.mcp_name} (${model.mcp_id || ""})`
+            : model.mcp_id || "";
+
+          if (mcpLabel) {
+            const mcpLine = document.createElement("div");
+            mcpLine.appendChild(strong("MCP: "));
+            mcpLine.appendChild(document.createTextNode(mcpLabel));
+            box.appendChild(mcpLine);
+          }
+
+          if (model.method && model.path) {
+            const ep = document.createElement("div");
+            ep.appendChild(
+              codeInline(`${String(model.method).toUpperCase()} ${model.path}`)
+            );
+            box.appendChild(ep);
+          }
+
+          if (model.body && typeof model.body === "object" && model.body.cmd) {
+            const cmd = document.createElement("div");
+            cmd.appendChild(strong("Comando: "));
+            cmd.appendChild(codeInline(model.body.cmd));
+            box.appendChild(cmd);
+          }
+
+          // Detalles opcionales
+          if (model.body || model.query) {
+            const tech = [];
+            if (model.query) tech.push(`query:\n${pretty(model.query)}`);
+            if (model.body) tech.push(`body:\n${pretty(model.body)}`);
+            box.appendChild(
+              detailsBlock("Detalles", preBlock(tech.join("\n\n")))
+            );
+          }
+
+          return box;
+        }
+
+        function renderUiMessage(model) {
+          switch (model.kind) {
+            case "plan_proposed":
+              return renderPlanProposed(model);
+            case "step_start":
+              return renderStepStart(model);
+            case "step_ok":
+              return renderStepResult(model, true);
+            case "step_err":
+              return renderStepResult(model, false);
+            case "step_retry":
+              // puedes reutilizar renderStepStart o hacer uno propio
+              return renderStepStart(model);
+            default: {
+              const box = document.createElement("div");
+              box.className = "bubble";
+              box.appendChild(el_("div", {}, [strong(model.kind || "Evento")]));
+              box.appendChild(
+                detailsBlock("Detalles", preBlock(pretty(model)))
+              );
+              return box;
+            }
+          }
         }
 
         return {

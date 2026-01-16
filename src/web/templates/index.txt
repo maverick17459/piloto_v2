@@ -1,0 +1,2047 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Piloto v2</title>
+
+    <style>
+      :root {
+        --bg: #ffffff;
+        --text: #111827;
+        --muted: #6b7280;
+        --border: #e5e7eb;
+        --soft: #f3f4f6;
+        --soft2: #f9fafb;
+        --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+          Arial;
+        background: var(--bg);
+        color: var(--text);
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* Layout */
+      .app {
+        display: flex;
+        height: 100vh;
+      }
+
+      /* Sidebar */
+      .sidebar {
+        width: 290px;
+        background: var(--soft2);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        padding: 10px 10px 12px;
+        gap: 8px;
+        overflow: hidden;
+      }
+      .sb-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 6px 2px;
+      }
+      .sb-logo {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: #fff;
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        font-weight: 700;
+        font-size: 13px;
+      }
+      .icon-btn {
+        border: 1px solid var(--border);
+        background: #fff;
+        box-shadow: var(--shadow);
+        border-radius: 10px;
+        padding: 7px 10px;
+        cursor: pointer;
+        color: var(--text);
+        font-size: 12px;
+      }
+      .icon-btn:hover {
+        background: var(--soft);
+      }
+
+      .sb-scroll {
+        overflow: auto;
+        padding-right: 4px;
+      }
+
+      .sb-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 8px 6px 10px;
+      }
+      .sb-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 10px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: #fff;
+        box-shadow: var(--shadow);
+        cursor: pointer;
+        user-select: none;
+      }
+      .sb-item:hover {
+        background: var(--soft);
+      }
+      .sb-item-btn {
+        justify-content: flex-start;
+      }
+      .sb-ic {
+        width: 18px;
+        text-align: center;
+      }
+      .sb-search {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 8px 10px;
+        box-shadow: var(--shadow);
+      }
+      .sb-search input {
+        border: 0;
+        outline: 0;
+        width: 100%;
+        font-size: 13px;
+        background: transparent;
+      }
+
+      .sb-section {
+        padding: 8px 6px;
+      }
+      .sb-section-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 2px 2px 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .count-pill {
+        font-size: 11px;
+        padding: 2px 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--muted);
+      }
+      .sb-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .sb-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 10px 10px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: #fff;
+        cursor: pointer;
+        box-shadow: var(--shadow);
+      }
+      .sb-row:hover {
+        background: var(--soft);
+      }
+      .sb-row.active {
+        border-color: #c7c7c7;
+      }
+      .sb-row-title {
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
+      }
+
+      /* Main */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .topbar {
+        border-bottom: 1px solid var(--border);
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        background: #fff;
+      }
+      .chat-title {
+        font-weight: 700;
+        font-size: 14px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .btn {
+        border: 1px solid var(--border);
+        background: #fff;
+        box-shadow: var(--shadow);
+        border-radius: 12px;
+        padding: 9px 12px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .btn:hover {
+        background: var(--soft);
+      }
+      .primary {
+        border-color: #111827;
+        background: #111827;
+        color: #fff;
+      }
+      .primary:hover {
+        opacity: 0.92;
+      }
+
+      .chat {
+        flex: 1;
+        overflow: auto;
+        padding: 18px 0 12px;
+        background: #fff;
+      }
+      .chat-inner {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 0 16px;
+      }
+
+      /* Messages */
+      .msg {
+        display: flex;
+        padding: 10px 0;
+      }
+      .msg.user {
+        justify-content: flex-end;
+      }
+      .msg.assistant {
+        justify-content: flex-start;
+      }
+
+      .bubble {
+        max-width: 75%;
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        white-space: pre-wrap;
+        line-height: 1.45;
+        font-size: 14px;
+        background: #fff;
+      }
+      .msg.user .bubble {
+        background: var(--soft);
+      }
+      .muted {
+        color: var(--muted);
+      }
+
+      /* Composer */
+      .composer {
+        border-top: 1px solid var(--border);
+        padding: 12px 0 16px;
+        background: #fff;
+      }
+      .composer-inner {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 0 16px;
+      }
+      .input-wrap {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 10px 10px 10px 12px;
+        box-shadow: var(--shadow);
+      }
+      textarea {
+        width: 100%;
+        resize: none;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text);
+        font-size: 14px;
+        line-height: 1.35;
+        min-height: 22px;
+        max-height: 180px;
+      }
+      .send {
+        border: 1px solid #111827;
+        background: #111827;
+        color: #fff;
+        cursor: pointer;
+        border-radius: 14px;
+        padding: 10px 12px;
+        font-size: 13px;
+        min-width: 76px;
+      }
+      .send:hover {
+        opacity: 0.92;
+      }
+
+      .hint {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      /* Modal */
+      .hidden {
+        display: none !important;
+      }
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.25);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        z-index: 50;
+      }
+      .modal {
+        width: 520px;
+        max-width: 95vw;
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+        overflow: hidden;
+      }
+      .modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 14px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      .modal-title {
+        font-weight: 700;
+        font-size: 14px;
+      }
+      .modal-body {
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .modal-label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .modal-input {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-size: 14px;
+        outline: none;
+        min-height: 44px;
+      }
+      .modal-input:focus {
+        border-color: #c7c7c7;
+      }
+      .modal-error {
+        font-size: 12px;
+        color: #b91c1c;
+      }
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 12px 14px 14px;
+        border-top: 1px solid var(--border);
+      }
+
+      /* MCP pills (en el modal del proyecto) */
+      .pill {
+        font-size: 11px;
+        padding: 2px 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--muted);
+      }
+      .pill.on {
+        color: #065f46;
+        border-color: #a7f3d0;
+        background: #ecfdf5;
+      }
+      .pill.off {
+        color: #7c2d12;
+        border-color: #fed7aa;
+        background: #fff7ed;
+      }
+
+      /* Toggle switch */
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 44px;
+        height: 24px;
+      }
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        inset: 0;
+        background: #e5e7eb;
+        transition: 0.2s;
+        border-radius: 999px;
+      }
+      .slider:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 3px;
+        top: 3px;
+        background: white;
+        transition: 0.2s;
+        border-radius: 999px;
+        box-shadow: var(--shadow);
+      }
+      input:checked + .slider {
+        background: #111827;
+      }
+      input:checked + .slider:before {
+        transform: translateX(20px);
+      }
+      input:disabled + .slider {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      @media (max-width: 720px) {
+        .sidebar {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sb-top">
+          <div class="sb-logo" title="Piloto v2">gpt</div>
+          <button class="icon-btn" id="collapseBtn" title="Contraer">▢</button>
+        </div>
+
+        <div class="sb-scroll">
+          <nav class="sb-nav">
+            <button class="sb-item sb-item-btn" id="newChatBtn">
+              <span class="sb-ic">+</span>
+              <span>Nuevo chat</span>
+            </button>
+
+            <div class="sb-search">
+              <span class="sb-ic">⌕</span>
+              <input id="searchChats" type="text" placeholder="Buscar chats" />
+            </div>
+          </nav>
+
+          <div class="sb-section">
+            <div class="sb-section-title">
+              <span>Proyectos</span>
+              <div style="display: flex; gap: 8px; align-items: center">
+                <span class="count-pill" id="projectCount">0</span>
+                <button
+                  class="icon-btn"
+                  id="editProjectContextBtn"
+                  title="Editar contexto"
+                >
+                  ✎
+                </button>
+                <button
+                  class="icon-btn"
+                  id="manageProjectMcpsBtn"
+                  title="MCP del proyecto"
+                >
+                  🔌
+                </button>
+                <button class="icon-btn" id="deleteProjectBtn" title="Eliminar">
+                  🗑
+                </button>
+              </div>
+            </div>
+
+            <button class="sb-item sb-item-btn" id="newProjectBtn">
+              <span class="sb-ic">＋</span>
+              <span>Nuevo proyecto</span>
+            </button>
+
+            <div class="sb-list" id="projectsList"></div>
+
+            <div class="sb-section-title" style="margin-top: 10px">
+              <span>Tus chats</span>
+              <span class="count-pill" id="chatCount">0</span>
+            </div>
+
+            <div class="sb-list" id="chatsList"></div>
+
+            <div class="sb-section" style="margin-top: 10px">
+              <div class="sb-section-title">
+                <span>MCP</span>
+                <div style="display: flex; gap: 8px; align-items: center">
+                  <span class="count-pill" id="mcpCount">0</span>
+                  <button class="icon-btn" id="newMcpBtn" title="Agregar MCP">
+                    ＋
+                  </button>
+                </div>
+              </div>
+
+              <div class="sb-list" id="mcpsList"></div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="topbar">
+          <div class="chat-title" id="topTitle">Selecciona un chat</div>
+          <div style="display: flex; gap: 8px">
+            <button class="btn" id="renameChatBtn">Renombrar</button>
+          </div>
+        </div>
+
+        <div class="chat" id="chatScroll">
+          <div class="chat-inner" id="chatInner">
+            <div class="msg assistant">
+              <div class="bubble muted">
+                Crea un proyecto y un chat (o usa los existentes) para empezar.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="composer">
+          <div class="composer-inner">
+            <div class="input-wrap">
+              <textarea
+                id="input"
+                placeholder="Escribe un mensaje… (Enter para enviar, Shift+Enter nueva línea)"
+              ></textarea>
+              <button class="send" id="sendBtn">Enviar</button>
+            </div>
+            <div class="hint">
+              <span id="status" class="muted">Listo</span>
+              <span class="muted"
+                >Modelo: <b style="font-weight: 600">API</b></span
+              >
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Modal genérico (textarea) -->
+    <div class="modal-backdrop hidden" id="modalBackdrop">
+      <div
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modalTitle"
+      >
+        <div class="modal-head">
+          <div class="modal-title" id="modalTitle">Título</div>
+          <button class="icon-btn" id="modalClose" title="Cerrar">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <label class="modal-label" id="modalLabel" for="modalInput"
+            >Nombre</label
+          >
+          <textarea
+            class="modal-input"
+            id="modalInput"
+            placeholder="Escribe aquí…"
+            style="min-height: 110px; resize: vertical"
+          ></textarea>
+          <div class="modal-error hidden" id="modalError"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn" id="modalCancel">Cancelar</button>
+          <button class="btn primary" id="modalOk">Aceptar</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      // ============================================================
+      // Api (solo fetch)
+      // ============================================================
+      const Api = (() => {
+        async function request(url, { method = "GET", body } = {}) {
+          const res = await fetch(url, {
+            method,
+            headers: body ? { "Content-Type": "application/json" } : undefined,
+            body: body ? JSON.stringify(body) : undefined,
+          });
+
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || "Error");
+          return data;
+        }
+
+        return {
+          get: (url) => request(url),
+          post: (url, body) => request(url, { method: "POST", body }),
+          patch: (url, body) => request(url, { method: "PATCH", body }),
+          del: async (url) => {
+            const res = await fetch(url, { method: "DELETE" });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || "Error");
+            return data;
+          },
+        };
+      })();
+
+      // ============================================================
+      // State
+      // ============================================================
+      const State = (() => ({
+        projects: [],
+        chats: [],
+        mcps: [],
+        selectedProjectId: null,
+        selectedChatId: null,
+
+        activeRunId: null,
+        pendingRunId: null,
+
+        polling: false,
+        pollAbort: false,
+
+        sending: false,
+      }))();
+
+      // ============================================================
+      // UI helpers + DOM refs
+      // ============================================================
+      const UI = (() => {
+        const el = {
+          projectsList: document.getElementById("projectsList"),
+          chatsList: document.getElementById("chatsList"),
+          mcpsList: document.getElementById("mcpsList"),
+
+          chatInner: document.getElementById("chatInner"),
+          chatScroll: document.getElementById("chatScroll"),
+          input: document.getElementById("input"),
+
+          sendBtn: document.getElementById("sendBtn"),
+          newProjectBtn: document.getElementById("newProjectBtn"),
+          newChatBtn: document.getElementById("newChatBtn"),
+          renameChatBtn: document.getElementById("renameChatBtn"),
+          newMcpBtn: document.getElementById("newMcpBtn"),
+
+          topTitle: document.getElementById("topTitle"),
+          statusEl: document.getElementById("status"),
+
+          projectCount: document.getElementById("projectCount"),
+          chatCount: document.getElementById("chatCount"),
+          mcpCount: document.getElementById("mcpCount"),
+
+          searchChats: document.getElementById("searchChats"),
+          editProjectContextBtn: document.getElementById(
+            "editProjectContextBtn"
+          ),
+          manageProjectMcpsBtn: document.getElementById("manageProjectMcpsBtn"),
+          deleteProjectBtn: document.getElementById("deleteProjectBtn"),
+        };
+
+        function setStatus(t) {
+          if (el.statusEl) el.statusEl.textContent = t || "";
+        }
+
+        function escapeHtml(s) {
+          return (s ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;");
+        }
+
+        function parseUiEnvelope(text) {
+          if (!text || typeof text !== "string") return null;
+          if (!text.startsWith("PILOTO_MSG_V1\n")) return null;
+          try {
+            return JSON.parse(text.slice("PILOTO_MSG_V1\n".length));
+          } catch {
+            return null;
+          }
+        }
+
+        function autoResize() {
+          if (!el.input) return;
+          el.input.style.height = "auto";
+          el.input.style.height = Math.min(el.input.scrollHeight, 180) + "px";
+        }
+
+        function scrollToBottom() {
+          if (!el.chatScroll) return;
+          el.chatScroll.scrollTop = el.chatScroll.scrollHeight;
+        }
+
+        function clearChatView() {
+          if (!el.chatInner) return;
+          el.chatInner.innerHTML = `
+            <div class="msg assistant">
+              <div class="bubble muted">Selecciona un chat para ver el historial.</div>
+            </div>
+          `;
+        }
+
+        function addMessage(role, text) {
+          if (!el.chatInner) return;
+
+          const row = document.createElement("div");
+          row.className = `msg ${role === "user" ? "user" : "assistant"}`;
+
+          const ui = parseUiEnvelope(text);
+          if (ui) {
+            row.appendChild(renderUiMessage(ui));
+          } else {
+            row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+          }
+
+          el.chatInner.appendChild(row);
+          scrollToBottom();
+        }
+
+        function addMessageNoScroll(role, text) {
+          if (!el.chatInner) return;
+
+          const row = document.createElement("div");
+          row.className = `msg ${role === "user" ? "user" : "assistant"}`;
+
+          const ui = parseUiEnvelope(text);
+          if (ui) {
+            row.appendChild(renderUiMessage(ui));
+          } else {
+            row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+          }
+
+          el.chatInner.appendChild(row);
+        }
+
+        function addTyping() {
+          if (!el.chatInner) return null;
+          const typing = document.createElement("div");
+          typing.className = "msg assistant";
+          typing.innerHTML = `<div class="bubble muted">.</div>`;
+          el.chatInner.appendChild(typing);
+          scrollToBottom();
+          return typing;
+        }
+
+        function setComposerEnabled(enabled) {
+          if (el.input) el.input.disabled = !enabled;
+          if (el.sendBtn) el.sendBtn.disabled = !enabled;
+        }
+
+        function renderUiMessage(model) {
+          const wrap = document.createElement("div");
+          wrap.className = "bubble";
+
+          const h = document.createElement("div");
+          h.style.fontWeight = "600";
+          h.style.marginBottom = "6px";
+          h.textContent = titleForKind(model.kind);
+          wrap.appendChild(h);
+
+          function addPre(label, value) {
+            if (value == null) return;
+            const l = document.createElement("div");
+            l.className = "muted";
+            l.style.fontSize = "12px";
+            l.textContent = label;
+            const pre = document.createElement("pre");
+            pre.textContent = typeof value === "string" ? value : pretty(value);
+            pre.style.marginTop = "4px";
+            wrap.appendChild(l);
+            wrap.appendChild(pre);
+          }
+
+          if (model.goal) {
+            const g = document.createElement("div");
+            g.textContent = "Objetivo: " + model.goal;
+            g.style.marginBottom = "6px";
+            wrap.appendChild(g);
+          }
+
+          if (model.steps) {
+            model.steps.forEach((s, i) => {
+              const t = document.createElement("div");
+              t.style.marginTop = "8px";
+              t.style.fontWeight = "600";
+              t.textContent = `Paso ${i + 1}`;
+              wrap.appendChild(t);
+
+              addPre("MCP / Endpoint", `${s.method} ${s.path}`);
+              addPre("Body", s.body);
+            });
+          }
+
+          addPre("Request", model.body);
+          addPre("Response", model.response);
+          addPre("stdout", model.stdout);
+          addPre("stderr", model.stderr);
+
+          if (model.confirm_hint) {
+            const c = document.createElement("div");
+            c.style.marginTop = "8px";
+            c.style.fontWeight = "600";
+            c.textContent = model.confirm_hint;
+            wrap.appendChild(c);
+          }
+
+          return wrap;
+        }
+
+        function titleForKind(kind) {
+          switch (kind) {
+            case "plan_proposed":
+              return "📌 Plan propuesto";
+            case "step_start":
+              return "⏳ Paso iniciado";
+            case "step_ok":
+              return "✅ Paso completado";
+            case "step_err":
+              return "❌ Error en paso";
+            case "step_retry":
+              return "⚠️ Reintento";
+            case "run_start":
+              return "▶️ Ejecución iniciada";
+            case "run_done":
+              return "🏁 Ejecución finalizada";
+            case "run_error":
+              return "❌ Ejecución fallida";
+            default:
+              return kind || "Evento";
+          }
+        }
+
+        function el_(tag, attrs = {}, children = []) {
+          const n = document.createElement(tag);
+          for (const [k, v] of Object.entries(attrs)) {
+            if (k === "class") n.className = v;
+            else if (k === "text") n.textContent = v;
+            else n.setAttribute(k, v);
+          }
+          for (const c of children) n.appendChild(c);
+          return n;
+        }
+
+        function strong(text) {
+          return el_("strong", { text });
+        }
+        function codeInline(text) {
+          return el_("code", { text });
+        }
+
+        function preBlock(text) {
+          const pre = document.createElement("pre");
+          pre.textContent = text ?? "";
+          pre.style.margin = "6px 0 0";
+          pre.style.padding = "10px 12px";
+          pre.style.border = "1px solid var(--border)";
+          pre.style.borderRadius = "12px";
+          pre.style.background = "var(--soft2)";
+          pre.style.overflow = "auto";
+          pre.style.whiteSpace = "pre";
+          pre.style.fontSize = "13px";
+          return pre;
+        }
+
+        function pretty(obj) {
+          try {
+            return JSON.stringify(obj, null, 2);
+          } catch {
+            return String(obj);
+          }
+        }
+
+        function detailsBlock(summaryText, contentNode) {
+          const d = document.createElement("details");
+          const s = document.createElement("summary");
+          s.textContent = summaryText;
+          s.style.cursor = "pointer";
+          s.style.userSelect = "none";
+          d.appendChild(s);
+          d.appendChild(contentNode);
+          d.style.marginTop = "8px";
+          return d;
+        }
+
+        function renderPlanProposed(m) {
+          const box = document.createElement("div");
+          box.className = "bubble";
+
+          box.appendChild(el_("div", {}, [strong("📌 Plan propuesto")]));
+          if (m.goal)
+            box.appendChild(el_("div", { text: `Objetivo: ${m.goal}` }));
+
+          const steps = Array.isArray(m.steps) ? m.steps : [];
+          steps.forEach((s, idx) => {
+            const line = document.createElement("div");
+            line.style.marginTop = "10px";
+
+            const mcpLabel = s.mcp_name
+              ? `${s.mcp_name} (${s.mcp_id || ""})`
+              : s.mcp_id || "";
+            line.appendChild(strong(`Paso ${idx + 1}: `));
+            line.appendChild(
+              codeInline(`${(s.method || "").toUpperCase()} ${s.path || ""}`)
+            );
+
+            if (mcpLabel) {
+              const mcpLine = document.createElement("div");
+              mcpLine.appendChild(strong("MCP: "));
+              mcpLine.appendChild(document.createTextNode(mcpLabel));
+              mcpLine.style.marginTop = "4px";
+              box.appendChild(mcpLine);
+            }
+
+            box.appendChild(line);
+
+            // Mostrar el comando como GPT (texto), no JSON crudo
+            // Caso típico /command: body = { cmd: "..." }
+            if (s.body && typeof s.body === "object" && s.body.cmd) {
+              const cmdLine = document.createElement("div");
+              cmdLine.style.marginTop = "6px";
+              cmdLine.appendChild(strong("Comando: "));
+              cmdLine.appendChild(codeInline(s.body.cmd));
+              box.appendChild(cmdLine);
+            }
+
+            // Detalles técnicos colapsables (body/query completos)
+            const tech = [];
+            if (s.query) tech.push(`query:\n${pretty(s.query)}`);
+            if (s.body) tech.push(`body:\n${pretty(s.body)}`);
+            if (tech.length)
+              box.appendChild(
+                detailsBlock("Detalles", preBlock(tech.join("\n\n")))
+              );
+          });
+
+          if (m.confirm_hint) {
+            const hint = document.createElement("div");
+            hint.style.marginTop = "10px";
+            hint.appendChild(strong(m.confirm_hint));
+            box.appendChild(hint);
+          }
+
+          return box;
+        }
+
+        function renderStepResult(m, ok) {
+          const box = document.createElement("div");
+          box.className = "bubble";
+
+          box.appendChild(
+            el_("div", {}, [strong(ok ? "✅ Resultado" : "❌ Error")])
+          );
+
+          const mcpLabel = m.mcp_name
+            ? `${m.mcp_name} (${m.mcp_id || ""})`
+            : m.mcp_id || "";
+          if (mcpLabel) {
+            const mcpLine = document.createElement("div");
+            mcpLine.appendChild(strong("MCP: "));
+            mcpLine.appendChild(document.createTextNode(mcpLabel));
+            box.appendChild(mcpLine);
+          }
+
+          if (m.method && m.path) {
+            const ep = document.createElement("div");
+            ep.appendChild(strong("Endpoint: "));
+            ep.appendChild(
+              codeInline(`${String(m.method).toUpperCase()} ${m.path}`)
+            );
+            box.appendChild(ep);
+          }
+
+          // Caso /command: muestra stdout/stderr como ChatGPT
+          if (m.stdout) {
+            box.appendChild(el_("div", { text: "Salida (stdout):" }));
+            box.appendChild(preBlock(String(m.stdout)));
+          }
+          if (m.stderr) {
+            box.appendChild(el_("div", { text: "Errores (stderr):" }));
+            box.appendChild(preBlock(String(m.stderr)));
+          }
+
+          // Si no hay stdout/stderr, muestra una síntesis human-readable:
+          if (!m.stdout && !m.stderr && m.response != null) {
+            // intenta mensaje simple
+            const txt = typeof m.response === "string" ? m.response : null;
+            if (txt) box.appendChild(el_("div", { text: txt }));
+            // y detalles colapsables
+            box.appendChild(
+              detailsBlock("Detalles", preBlock(pretty(m.response)))
+            );
+          }
+
+          // Siempre: detalles técnicos opcionales
+          if (m.body || m.query || m.response) {
+            const tech = [];
+            if (m.query) tech.push(`query:\n${pretty(m.query)}`);
+            if (m.body) tech.push(`body:\n${pretty(m.body)}`);
+            if (m.response) tech.push(`response:\n${pretty(m.response)}`);
+            box.appendChild(
+              detailsBlock("Ver JSON", preBlock(tech.join("\n\n")))
+            );
+          }
+
+          function renderUiMessage(model) {
+            switch (model.kind) {
+              case "plan_proposed":
+                return renderPlanProposed(model);
+              case "step_ok":
+                return renderStepResult(model, true);
+              case "step_err":
+                return renderStepResult(model, false);
+              case "step_start": {
+                const box = document.createElement("div");
+                box.className = "bubble";
+                box.appendChild(el_("div", {}, [strong("⏳ Ejecutando…")]));
+                if (model.mcp_name || model.mcp_id) {
+                  const mcpLabel = model.mcp_name
+                    ? `${model.mcp_name} (${model.mcp_id || ""})`
+                    : model.mcp_id || "";
+                  const mcpLine = document.createElement("div");
+                  mcpLine.appendChild(strong("MCP: "));
+                  mcpLine.appendChild(document.createTextNode(mcpLabel));
+                  box.appendChild(mcpLine);
+                }
+                if (model.method && model.path) {
+                  const ep = document.createElement("div");
+                  ep.appendChild(
+                    codeInline(
+                      `${String(model.method).toUpperCase()} ${model.path}`
+                    )
+                  );
+                  box.appendChild(ep);
+                }
+                // si es /command y trae cmd:
+                if (model.body && model.body.cmd) {
+                  const cmd = document.createElement("div");
+                  cmd.appendChild(strong("Comando: "));
+                  cmd.appendChild(codeInline(model.body.cmd));
+                  box.appendChild(cmd);
+                }
+                return box;
+              }
+              default: {
+                // fallback seguro: si llega un kind nuevo, lo mostramos simple + detalles
+                const box = document.createElement("div");
+                box.className = "bubble";
+                box.appendChild(
+                  el_("div", {}, [strong(model.kind || "Evento")])
+                );
+                box.appendChild(
+                  detailsBlock("Detalles", preBlock(pretty(model)))
+                );
+                return box;
+              }
+            }
+          }
+
+          return box;
+        }
+
+        return {
+          el,
+          setStatus,
+          escapeHtml,
+          autoResize,
+          clearChatView,
+          addMessage,
+          addMessageNoScroll,
+          addTyping,
+          scrollToBottom,
+          setComposerEnabled,
+        };
+      })();
+
+      // ============================================================
+      // Modal genérico
+      // ============================================================
+      const Modals = (() => {
+        const modalBackdrop = document.getElementById("modalBackdrop");
+        const modalTitle = document.getElementById("modalTitle");
+        const modalLabel = document.getElementById("modalLabel");
+        const modalInput = document.getElementById("modalInput");
+        const modalError = document.getElementById("modalError");
+        const modalOk = document.getElementById("modalOk");
+        const modalCancel = document.getElementById("modalCancel");
+        const modalClose = document.getElementById("modalClose");
+
+        let modalOnConfirm = null;
+
+        function openModal({
+          title,
+          label,
+          placeholder,
+          okText,
+          defaultValue,
+          onConfirm,
+        }) {
+          if (!modalBackdrop || !modalInput) return;
+
+          modalTitle.textContent = title || "Acción";
+          modalLabel.textContent = label || "Nombre";
+          modalOk.textContent = okText || "Aceptar";
+
+          modalInput.placeholder = placeholder || "";
+          modalInput.value = defaultValue || "";
+
+          modalError.textContent = "";
+          modalError.classList.add("hidden");
+
+          modalOnConfirm = onConfirm;
+          modalBackdrop.classList.remove("hidden");
+          setTimeout(() => modalInput.focus(), 0);
+        }
+
+        function closeModal() {
+          if (!modalBackdrop) return;
+          modalBackdrop.classList.add("hidden");
+          modalOnConfirm = null;
+        }
+
+        function showModalError(msg) {
+          if (!modalError) return;
+          modalError.textContent = msg;
+          modalError.classList.remove("hidden");
+        }
+
+        if (modalCancel) modalCancel.onclick = closeModal;
+        if (modalClose) modalClose.onclick = closeModal;
+
+        if (modalBackdrop) {
+          modalBackdrop.addEventListener("click", (e) => {
+            if (e.target === modalBackdrop) closeModal();
+          });
+        }
+
+        if (modalInput) {
+          modalInput.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") closeModal();
+            if (e.key === "Enter" && !e.shiftKey) modalOk.click();
+          });
+        }
+
+        if (modalOk) {
+          modalOk.onclick = async () => {
+            const value = (modalInput.value || "").trim();
+            if (!value)
+              return showModalError("Este campo no puede estar vacío.");
+            if (typeof modalOnConfirm === "function")
+              await modalOnConfirm(value);
+          };
+        }
+
+        // Modal MCP toggles (igual que tu versión; no lo toco aquí)
+        function openMcpToggleModal({ project, mcps, onSave }) {
+          const selected = new Set(project.mcp_ids || []);
+
+          const overlay = document.createElement("div");
+          overlay.className = "modal-backdrop";
+          overlay.style.zIndex = 60;
+
+          const modal = document.createElement("div");
+          modal.className = "modal";
+          modal.style.width = "720px";
+          modal.style.maxWidth = "96vw";
+
+          modal.innerHTML = `
+        <div class="modal-head">
+          <div class="modal-title">MCP del proyecto: ${UI.escapeHtml(
+            project.name
+          )}</div>
+          <button class="icon-btn" data-close title="Cerrar">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <div class="muted" style="font-size:12px">
+            Selecciona qué MCPs estarán asociados a este proyecto.
+            <br/>
+            (Los MCP globalmente inactivos aparecen bloqueados)
+          </div>
+
+          <div style="display:flex; gap:10px; margin-bottom:10px">
+            <input id="mcpSearch" class="modal-input" placeholder="Buscar MCP…" style="flex:1; min-height: 38px" />
+            <button class="btn" id="mcpAll">Todos</button>
+            <button class="btn" id="mcpNone">Ninguno</button>
+          </div>
+
+          <div id="mcpToggleList" style="max-height:360px; overflow:auto; border:1px solid var(--border); border-radius:12px;"></div>
+
+          <div id="mcpErr" class="muted" style="color:#b91c1c; margin-top:10px; display:none;"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn" data-cancel>Cancelar</button>
+          <button class="btn primary" data-save>Guardar</button>
+        </div>
+      `;
+
+          overlay.appendChild(modal);
+          document.body.appendChild(overlay);
+
+          const elList = modal.querySelector("#mcpToggleList");
+          const elSearch = modal.querySelector("#mcpSearch");
+          const elErr = modal.querySelector("#mcpErr");
+
+          function setErr(msg) {
+            if (!msg) {
+              elErr.style.display = "none";
+              elErr.textContent = "";
+            } else {
+              elErr.style.display = "block";
+              elErr.textContent = msg;
+            }
+          }
+
+          function render(filterText = "") {
+            const q = (filterText || "").trim().toLowerCase();
+            elList.innerHTML = "";
+
+            const filtered = mcps.filter((m) => {
+              if (!q) return true;
+              return (
+                (m.name || "").toLowerCase().includes(q) ||
+                (m.base_url || "").toLowerCase().includes(q)
+              );
+            });
+
+            if (!filtered.length) {
+              elList.innerHTML = `<div class="muted" style="padding:12px">No hay resultados.</div>`;
+              return;
+            }
+
+            filtered.forEach((m, idx) => {
+              const row = document.createElement("div");
+              row.style.display = "flex";
+              row.style.alignItems = "center";
+              row.style.justifyContent = "space-between";
+              row.style.gap = "12px";
+              row.style.padding = "10px 12px";
+              row.style.borderBottom =
+                idx === filtered.length - 1 ? "0" : "1px solid var(--border)";
+
+              const isGlobalActive = !!m.is_active;
+              const isChecked = selected.has(m.id);
+
+              row.innerHTML = `
+            <div style="min-width:0">
+              <div style="font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
+                ${UI.escapeHtml(m.name || m.base_url)}
+              </div>
+              <div class="muted" style="font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
+                ${UI.escapeHtml(m.base_url || "")}
+              </div>
+              <div style="margin-top:4px">
+                <span class="pill ${isGlobalActive ? "on" : "off"}">
+                  ${isGlobalActive ? "Global: Activo" : "Global: Inactivo"}
+                </span>
+              </div>
+            </div>
+
+            <label class="switch" title="${
+              isGlobalActive
+                ? "Activar/Desactivar para este proyecto"
+                : "MCP globalmente inactivo"
+            }">
+              <input type="checkbox" data-id="${m.id}" ${
+                isChecked ? "checked" : ""
+              } ${isGlobalActive ? "" : "disabled"} />
+              <span class="slider"></span>
+            </label>
+          `;
+
+              const cb = row.querySelector("input[type=checkbox]");
+              cb.addEventListener("change", () => {
+                const id = cb.getAttribute("data-id");
+                if (!id) return;
+                if (cb.checked) selected.add(id);
+                else selected.delete(id);
+              });
+
+              elList.appendChild(row);
+            });
+          }
+
+          render("");
+
+          modal.querySelector("[data-close]").onclick = () => overlay.remove();
+          modal.querySelector("[data-cancel]").onclick = () => overlay.remove();
+          overlay.addEventListener("click", (e) => {
+            if (e.target === overlay) overlay.remove();
+          });
+
+          elSearch.addEventListener("input", () => render(elSearch.value));
+
+          modal.querySelector("#mcpAll").onclick = () => {
+            mcps.forEach((m) => {
+              if (m.is_active) selected.add(m.id);
+            });
+            render(elSearch.value);
+          };
+          modal.querySelector("#mcpNone").onclick = () => {
+            selected.clear();
+            render(elSearch.value);
+          };
+
+          modal.querySelector("[data-save]").onclick = async () => {
+            try {
+              setErr("");
+              const ids = Array.from(selected);
+              const valid = new Set(mcps.map((m) => m.id));
+              const bad = ids.filter((id) => !valid.has(id));
+              if (bad.length)
+                return setErr(
+                  "IDs inválidos/no existentes:\n" + bad.join("\n")
+                );
+              await onSave(ids);
+              overlay.remove();
+            } catch (e) {
+              setErr(e.message || "No se pudo guardar.");
+            }
+          };
+        }
+
+        return { openModal, closeModal, showModalError, openMcpToggleModal };
+      })();
+
+      // ============================================================
+      // Render
+      // ============================================================
+      const Render = (() => {
+        function projects() {
+          UI.el.projectsList.innerHTML = "";
+          UI.el.projectCount.textContent = State.projects.length;
+
+          State.projects.forEach((p) => {
+            const row = document.createElement("div");
+            row.className =
+              "sb-row" + (p.id === State.selectedProjectId ? " active" : "");
+            row.innerHTML = `<div class="sb-row-title" title="${UI.escapeHtml(
+              p.name
+            )}">📁 ${UI.escapeHtml(p.name)}</div>`;
+            row.onclick = async () => {
+              Chat.stopRunPolling();
+              State.selectedProjectId = p.id;
+              State.selectedChatId = null;
+              UI.el.topTitle.textContent = "Selecciona un chat";
+              projects();
+              await Data.loadChats();
+              UI.clearChatView();
+            };
+            UI.el.projectsList.appendChild(row);
+          });
+        }
+
+        function chats(list = State.chats) {
+          UI.el.chatsList.innerHTML = "";
+          UI.el.chatCount.textContent = State.chats.length;
+
+          list.forEach((c) => {
+            const row = document.createElement("div");
+            row.className =
+              "sb-row" + (c.id === State.selectedChatId ? " active" : "");
+            row.innerHTML = `<div class="sb-row-title" title="${UI.escapeHtml(
+              c.title
+            )}">${UI.escapeHtml(c.title)}</div>`;
+            row.onclick = async () => {
+              Chat.stopRunPolling();
+              State.selectedChatId = c.id;
+              UI.el.topTitle.textContent = c.title;
+              chats();
+              await Chat.loadMessages();
+            };
+            UI.el.chatsList.appendChild(row);
+          });
+        }
+
+        function mcps() {
+          UI.el.mcpsList.innerHTML = "";
+          UI.el.mcpCount.textContent = State.mcps.length;
+
+          State.mcps.forEach((m) => {
+            const row = document.createElement("div");
+            row.className = "sb-row";
+            row.style.cursor = "default";
+            row.innerHTML = `
+          <div style="min-width:0">
+            <div class="sb-row-title" title="${UI.escapeHtml(
+              m.name || m.base_url
+            )}">
+              🔗 ${UI.escapeHtml(m.name || m.base_url)}
+            </div>
+            <div class="muted" style="font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">
+              ${UI.escapeHtml(m.base_url || "")}
+            </div>
+            <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap">
+              <span class="pill ${m.is_active ? "on" : "off"}">${
+              m.is_active ? "Activo" : "Inactivo"
+            }</span>
+              <span class="pill">Endpoints: ${
+                m.endpoint_count ?? (m.endpoints || []).length
+              }</span>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:6px; flex-shrink:0">
+            <button class="icon-btn" title="Activar/Desactivar" data-act="toggle">⏻</button>
+            <button class="icon-btn" title="Refresh OpenAPI" data-act="refresh">⟳</button>
+            <button class="icon-btn" title="Ver endpoints" data-act="details">≡</button>
+            <button class="icon-btn" title="Eliminar" data-act="delete">🗑</button>
+          </div>
+        `;
+
+            row.querySelector('[data-act="toggle"]').onclick = async () => {
+              try {
+                UI.setStatus("Actualizando MCP…");
+                await Api.post(`/api/mcps/${m.id}/active`, {
+                  active: !m.is_active,
+                });
+                await Data.loadMcps();
+                UI.setStatus("Listo");
+              } catch (e) {
+                UI.setStatus("Error");
+                alert(e.message || "No se pudo actualizar el MCP.");
+              }
+            };
+
+            row.querySelector('[data-act="refresh"]').onclick = async () => {
+              try {
+                UI.setStatus("Refrescando OpenAPI…");
+                await Api.post(`/api/mcps/${m.id}/refresh`, {});
+                await Data.loadMcps();
+                UI.setStatus("Listo");
+              } catch (e) {
+                UI.setStatus("Error");
+                alert(e.message || "No se pudo refrescar el MCP.");
+              }
+            };
+
+            row.querySelector('[data-act="details"]').onclick = () => {
+              const eps = (m.endpoints || [])
+                .slice(0, 120)
+                .map(
+                  (e) =>
+                    `${e.method} ${e.path}${e.summary ? " — " + e.summary : ""}`
+                )
+                .join("\n");
+
+              Modals.openModal({
+                title: `Endpoints: ${m.name || m.id}`,
+                label: "Lista (máx. 120)",
+                okText: "Cerrar",
+                defaultValue:
+                  eps || "Sin endpoints (¿está offline? usa Refresh).",
+                onConfirm: async () => Modals.closeModal(),
+              });
+            };
+
+            row.querySelector('[data-act="delete"]').onclick = async () => {
+              Modals.openModal({
+                title: "Eliminar MCP",
+                label: "Escribe ELIMINAR para confirmar",
+                placeholder: "ELIMINAR",
+                okText: "Eliminar",
+                defaultValue: "",
+                onConfirm: async (value) => {
+                  if (value !== "ELIMINAR")
+                    return Modals.showModalError(
+                      "Debes escribir ELIMINAR exactamente."
+                    );
+                  try {
+                    UI.setStatus("Eliminando MCP…");
+                    await Api.del(`/api/mcps/${m.id}`);
+                    await Data.loadMcps();
+                    UI.setStatus("Listo");
+                    Modals.closeModal();
+                    if (data.warning) alert(data.warning);
+                  } catch (e) {
+                    UI.setStatus("Error");
+                    Modals.showModalError("No se pudo eliminar el MCP.");
+                  }
+                },
+              });
+            };
+
+            UI.el.mcpsList.appendChild(row);
+          });
+        }
+
+        return { projects, chats, mcps };
+      })();
+
+      // ============================================================
+      // Data loaders
+      // ============================================================
+      const Data = (() => {
+        async function loadProjects() {
+          const data = await Api.get("/api/projects");
+          State.projects = data.projects || [];
+          if (!State.selectedProjectId && State.projects.length)
+            State.selectedProjectId = State.projects[0].id;
+          Render.projects();
+        }
+
+        async function loadChats() {
+          if (!State.selectedProjectId) {
+            State.chats = [];
+            Render.chats();
+            return;
+          }
+          const data = await Api.get(
+            `/api/projects/${State.selectedProjectId}/chats`
+          );
+          State.chats = data.chats || [];
+          Render.chats();
+
+          if (!State.selectedChatId && State.chats.length) {
+            State.selectedChatId = State.chats[0].id;
+            UI.el.topTitle.textContent = State.chats[0].title;
+            Render.chats();
+            await Chat.loadMessages();
+          }
+        }
+
+        async function loadMcps() {
+          const data = await Api.get("/api/mcps");
+          State.mcps = data.items || [];
+          Render.mcps();
+        }
+
+        async function loadProject(projectId) {
+          const data = await Api.get(`/api/projects/${projectId}`);
+          return data.project;
+        }
+
+        return { loadProjects, loadChats, loadMcps, loadProject };
+      })();
+
+      // ============================================================
+      // Chat
+      // ============================================================
+      const Chat = (() => {
+        function sleep(ms) {
+          return new Promise((r) => setTimeout(r, ms));
+        }
+
+        async function loadMessages() {
+          if (!State.selectedChatId) return UI.clearChatView();
+
+          const data = await Api.get(
+            `/api/chats/${State.selectedChatId}/messages`
+          );
+          const msgs = data.messages || [];
+          UI.el.topTitle.textContent = data.chat?.title || "Chat";
+
+          UI.el.chatInner.innerHTML = "";
+          if (msgs.length === 0) {
+            UI.el.chatInner.innerHTML = `
+              <div class="msg assistant">
+                <div class="bubble muted">Este chat está vacío. Escribe un mensaje abajo.</div>
+              </div>
+            `;
+          } else {
+            msgs.forEach((m) => UI.addMessageNoScroll(m.role, m.content));
+          }
+          UI.scrollToBottom();
+
+          // ✅ Fuente de verdad: state viene del backend
+          const st = data.state || {};
+          State.pendingRunId = st.pending_run_id || null;
+          State.activeRunId = st.active_run_id || null;
+
+          // ✅ Si hay un run activo, reanudar polling automáticamente
+          if (State.activeRunId) {
+            UI.setStatus("Ejecutando…");
+            pollRun(State.activeRunId);
+          } else {
+            UI.setStatus("Listo");
+          }
+        }
+
+        function stopRunPolling() {
+          State.pollAbort = true;
+          State.polling = false;
+          State.activeRunId = null;
+        }
+
+        async function pollRun(runId) {
+          stopRunPolling();
+          State.activeRunId = runId;
+
+          State.pollAbort = false;
+          if (State.polling) return;
+          State.polling = true;
+
+          try {
+            while (!State.pollAbort && State.activeRunId === runId) {
+              if (!State.selectedChatId) {
+                stopRunPolling();
+                return;
+              }
+
+              const data = await Api.get(`/api/runs/${runId}`);
+              const st = data?.run?.status || data?.status || "unknown";
+
+              await loadMessages();
+
+              if (st === "done" || st === "error" || st === "canceled") {
+                stopRunPolling();
+                State.pendingRunId = null;
+                UI.setStatus(st === "done" ? "Listo" : "Error");
+                return;
+              } else {
+                UI.setStatus(`Ejecutando… (${st})`);
+              }
+
+              await sleep(700);
+            }
+          } catch (e) {
+            stopRunPolling();
+            UI.setStatus("Error");
+          } finally {
+            State.polling = false;
+          }
+        }
+
+        async function ensureChatSelected() {
+          if (State.selectedChatId) return true;
+          if (!State.selectedProjectId) {
+            UI.setStatus("Error");
+            alert("Selecciona o crea un proyecto primero.");
+            return false;
+          }
+
+          try {
+            UI.setStatus("Creando chat…");
+            const data = await Api.post(
+              `/api/projects/${State.selectedProjectId}/chats`,
+              { title: "New chat" }
+            );
+
+            await Data.loadChats();
+            State.selectedChatId = data.chat.id;
+            UI.el.topTitle.textContent = data.chat.title;
+
+            await loadMessages();
+            return true;
+          } catch (e) {
+            UI.setStatus("Error");
+            alert(e.message || "No se pudo crear un chat.");
+            return false;
+          }
+        }
+
+        async function sendMessage() {
+          if (State.sending) return;
+
+          const ok = await ensureChatSelected();
+          if (!ok) return;
+
+          const text = UI.el.input.value.trim();
+          if (!text) return;
+
+          // ✅ Guard perfecto: confirm/cancel sólo si backend dice pending
+          const t = text.toLowerCase().trim();
+          const CONFIRM = new Set([
+            "confirmo",
+            "sí",
+            "si",
+            "ok",
+            "dale",
+            "ejecuta",
+            "proceder",
+            "continuar",
+          ]);
+          const CANCEL = new Set([
+            "cancela",
+            "cancelar",
+            "no",
+            "detener",
+            "para",
+          ]);
+
+          if ((CONFIRM.has(t) || CANCEL.has(t)) && !State.pendingRunId) {
+            UI.addMessage(
+              "assistant",
+              "No hay ningún plan pendiente para confirmar o cancelar."
+            );
+            UI.el.input.value = "";
+            UI.autoResize();
+            UI.setStatus("Listo");
+            return;
+          }
+
+          State.sending = true;
+          UI.setComposerEnabled(false);
+
+          UI.addMessage("user", text);
+          UI.el.input.value = "";
+          UI.autoResize();
+          UI.setStatus("Pensando…");
+
+          const typing = UI.addTyping();
+
+          try {
+            const data = await Api.post("/api/send", {
+              chat_id: State.selectedChatId,
+              message: text,
+            });
+
+            if (typing) typing.remove();
+
+            await loadMessages();
+            await Data.loadChats();
+
+            const run = data.run || data;
+            const runId =
+              run.run_id || data.run_id || data.active_run_id || null;
+            const st = run.status || data.status || "";
+
+            if (runId && (st === "queued" || st === "running")) {
+              UI.setStatus("Ejecutando…");
+              await pollRun(runId);
+            } else {
+              UI.setStatus("Listo");
+            }
+
+            const currentChat = State.chats.find(
+              (c) => c.id === State.selectedChatId
+            );
+            if (currentChat) UI.el.topTitle.textContent = currentChat.title;
+          } catch (e) {
+            if (typing) typing.remove();
+            UI.setStatus("Error");
+            UI.addMessage(
+              "assistant",
+              "Ocurrió un error enviando el mensaje. Intenta de nuevo."
+            );
+          } finally {
+            State.sending = false;
+            UI.setComposerEnabled(true);
+            UI.el.input.focus();
+          }
+        }
+
+        return { loadMessages, sendMessage, pollRun, stopRunPolling };
+      })();
+
+      // ============================================================
+      // Actions
+      // ============================================================
+      const Actions = (() => {
+        function wire() {
+          UI.el.newProjectBtn.onclick = () => {
+            Modals.openModal({
+              title: "Nuevo proyecto",
+              label: "Nombre del proyecto",
+              placeholder: "Ej: piloto",
+              okText: "Crear",
+              defaultValue: "",
+              onConfirm: async (name) => {
+                name = name.split("\n")[0].trim();
+                if (!name) return Modals.showModalError("Nombre inválido.");
+
+                try {
+                  UI.setStatus("Creando proyecto…");
+                  const data = await Api.post("/api/projects", { name });
+
+                  await Data.loadProjects();
+                  State.selectedProjectId = data.project.id;
+
+                  await Data.loadChats();
+                  State.selectedChatId = data.chat.id;
+
+                  await Chat.loadMessages();
+                  UI.setStatus("Listo");
+                  Modals.closeModal();
+                } catch (e) {
+                  UI.setStatus("Error");
+                  Modals.showModalError(
+                    e.message || "No se pudo crear el proyecto."
+                  );
+                }
+              },
+            });
+          };
+
+          UI.el.newChatBtn.onclick = async () => {
+            if (!State.selectedProjectId) return;
+            try {
+              UI.setStatus("Creando chat…");
+              const data = await Api.post(
+                `/api/projects/${State.selectedProjectId}/chats`,
+                { title: "New chat" }
+              );
+              await Data.loadChats();
+              State.selectedChatId = data.chat.id;
+              await Chat.loadMessages();
+              UI.setStatus("Listo");
+            } catch (e) {
+              UI.setStatus("Error");
+              alert(e.message);
+            }
+          };
+
+          UI.el.renameChatBtn.onclick = () => {
+            if (!State.selectedChatId) return;
+            const current = UI.el.topTitle.textContent || "Chat";
+
+            Modals.openModal({
+              title: "Renombrar chat",
+              label: "Nuevo nombre",
+              placeholder: "Nombre del chat",
+              okText: "Guardar",
+              defaultValue: current,
+              onConfirm: async (title) => {
+                title = title.split("\n")[0].trim();
+                if (!title) return Modals.showModalError("Nombre inválido.");
+                try {
+                  UI.setStatus("Renombrando…");
+                  await Api.patch(`/api/chats/${State.selectedChatId}`, {
+                    title,
+                  });
+                  await Data.loadChats();
+                  await Chat.loadMessages();
+                  UI.setStatus("Listo");
+                  Modals.closeModal();
+                } catch (e) {
+                  UI.setStatus("Error");
+                  Modals.showModalError(e.message || "No se pudo renombrar.");
+                }
+              },
+            });
+          };
+
+          UI.el.manageProjectMcpsBtn.onclick = async () => {
+            if (!State.selectedProjectId)
+              return alert("Selecciona un proyecto.");
+            try {
+              UI.setStatus("Cargando MCPs…");
+              const projResp = await Api.get(
+                `/api/projects/${State.selectedProjectId}`
+              );
+              const proj = projResp.project;
+
+              const mcpResp = await Api.get("/api/mcps");
+              const list = mcpResp.items || [];
+
+              Modals.openMcpToggleModal({
+                project: proj,
+                mcps: list,
+                onSave: async (selectedIds) => {
+                  UI.setStatus("Guardando MCPs…");
+                  await Api.patch(`/api/projects/${State.selectedProjectId}`, {
+                    mcp_ids: selectedIds,
+                  });
+                  UI.setStatus("Listo");
+                },
+              });
+
+              UI.setStatus("Listo");
+            } catch (e) {
+              UI.setStatus("Error");
+              alert(e.message || "Error cargando MCPs.");
+            }
+          };
+
+          UI.el.editProjectContextBtn.onclick = async () => {
+            if (!State.selectedProjectId) return;
+            try {
+              UI.setStatus("Cargando proyecto…");
+              const proj = await Data.loadProject(State.selectedProjectId);
+
+              Modals.openModal({
+                title: `Contexto del proyecto: ${proj.name}`,
+                label: "Instrucciones / memoria del proyecto",
+                placeholder:
+                  "Ej: Responde siempre en español. Prioriza FastAPI. Usa código listo para pegar…",
+                okText: "Guardar",
+                defaultValue: proj.context || "",
+                onConfirm: async (contextText) => {
+                  try {
+                    UI.setStatus("Guardando contexto…");
+                    await Api.patch(
+                      `/api/projects/${State.selectedProjectId}`,
+                      { context: contextText }
+                    );
+                    UI.setStatus("Listo");
+                    Modals.closeModal();
+                  } catch (e) {
+                    UI.setStatus("Error");
+                    Modals.showModalError(e.message || "No se pudo guardar.");
+                  }
+                },
+              });
+
+              UI.setStatus("Listo");
+            } catch (e) {
+              UI.setStatus("Error");
+              alert(e.message);
+            }
+          };
+
+          UI.el.newMcpBtn.onclick = () => {
+            Modals.openModal({
+              title: "Agregar MCP",
+              label: "Dirección (IP:PUERTO o URL)",
+              placeholder: "192.168.1.50:9090",
+              okText: "Agregar",
+              defaultValue: "",
+              onConfirm: async (value) => {
+                try {
+                  UI.setStatus("Agregando MCP…");
+                  const data = await Api.post("/api/mcps", { address: value });
+                  await Data.loadMcps();
+                  UI.setStatus("Listo");
+                  Modals.closeModal();
+                  if (data.warning) alert(data.warning);
+                } catch (e) {
+                  UI.setStatus("Error");
+                  Modals.showModalError(
+                    e.message || "No se pudo agregar el MCP."
+                  );
+                }
+              },
+            });
+          };
+
+          UI.el.deleteProjectBtn.onclick = async () => {
+            if (!State.selectedProjectId) return;
+
+            Modals.openModal({
+              title: "Eliminar proyecto",
+              label: "Escribe ELIMINAR para confirmar",
+              placeholder: "ELIMINAR",
+              okText: "Eliminar",
+              defaultValue: "",
+              onConfirm: async (value) => {
+                if (value !== "ELIMINAR")
+                  return Modals.showModalError(
+                    "Debes escribir ELIMINAR exactamente."
+                  );
+
+                try {
+                  UI.setStatus("Eliminando proyecto…");
+                  await Api.del(`/api/projects/${State.selectedProjectId}`);
+
+                  Chat.stopRunPolling();
+                  State.selectedProjectId = null;
+                  State.selectedChatId = null;
+                  State.pendingRunId = null;
+                  State.activeRunId = null;
+
+                  await Data.loadProjects();
+                  await Data.loadChats();
+                  UI.clearChatView();
+
+                  UI.setStatus("Listo");
+                  Modals.closeModal();
+                } catch (e) {
+                  UI.setStatus("Error");
+                  Modals.showModalError("No se pudo eliminar el proyecto.");
+                }
+              },
+            });
+          };
+
+          // Enviar (click)
+          UI.el.sendBtn.onclick = Chat.sendMessage;
+
+          // Composer
+          UI.el.input.addEventListener("input", UI.autoResize);
+          UI.el.input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              Chat.sendMessage();
+            }
+          });
+
+          // Buscar chats
+          UI.el.searchChats.addEventListener("input", () => {
+            const q = (UI.el.searchChats.value || "").toLowerCase().trim();
+            if (!q) return Render.chats();
+            Render.chats(
+              State.chats.filter((c) =>
+                (c.title || "").toLowerCase().includes(q)
+              )
+            );
+          });
+        }
+
+        return { wire };
+      })();
+
+      // ============================================================
+      // Init
+      // ============================================================
+      (async function init() {
+        try {
+          UI.setStatus("Cargando…");
+          UI.autoResize();
+          Actions.wire();
+
+          await Data.loadProjects();
+          await Data.loadChats();
+          await Data.loadMcps();
+
+          UI.setStatus("Listo");
+          UI.el.input.focus();
+        } catch (e) {
+          UI.setStatus("Error");
+          alert(e.message);
+        }
+      })();
+    </script>
+  </body>
+</html>
