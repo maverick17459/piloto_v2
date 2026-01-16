@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import asdict
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Protocol
 
-from src.agent.plan_run_store import PlanRunStore
 from src.agent.plan_models import PlanRun, PlanStep
 from src.agent.plan_executor import execute_plan_run
 
@@ -16,6 +16,11 @@ from src.mcp.invoke_sync import MCPCall, invoke_mcp_sync, MCPInvokeError
 # -------------------------------------------------
 # Utilidades de seguridad
 # -------------------------------------------------
+
+class PlanRunStoreLike(Protocol):
+    def get(self, run_id: str): ...
+    def update(self, run_id: str, **kwargs): ...
+
 
 def _looks_dangerous(cmd: str) -> bool:
     deny = [
@@ -44,6 +49,10 @@ def _short(x: Any, max_len: int = 240) -> str:
 
 def _is_command_call(method: str, path: str) -> bool:
     return method.upper() == "POST" and path == "/command"
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 def _command_failed(result: Any) -> tuple[bool, str]:
@@ -90,7 +99,7 @@ async def run_plan_in_background(
     proj,
     trace_id: str,
     log,
-    run_store: PlanRunStore,
+    run_store: PlanRunStoreLike,
     client,
 ) -> None:
 
@@ -99,8 +108,18 @@ async def run_plan_in_background(
     # Asegura consistencia: si este run debería ser el activo, lo anotamos (sin pisar si ya hay otro)
     try:
         st = store.get_state(chat_id) or {}
+        updates = {}
+
         if st.get("active_run_id") in (None, run_id):
-            store.set_state(chat_id, active_run_id=run_id)
+            updates["active_run_id"] = run_id
+
+        # Si por error sigue como pending, límpialo (evita "pending+active" simultáneo)
+        if st.get("pending_run_id") == run_id:
+            updates["pending_run_id"] = None
+
+        if updates:
+            store.set_state(chat_id, **updates)
+
     except Exception as e:
         log.info(
             "event=runner.ensure_active.error run_id=%s err=%s msg=%s",
@@ -108,6 +127,7 @@ async def run_plan_in_background(
             type(e).__name__,
             e,
         )
+
 
 
     loop = asyncio.get_running_loop()
@@ -364,7 +384,7 @@ async def run_plan_in_background(
             updates = {
                 "last_run_id": run_id,
                 "last_run_status": final_status,
-                "last_run_ts": _now_ms(),
+                "last_run_ts": _now_ms(),   
             }
 
             # Solo limpia active_run_id si este run sigue siendo el activo

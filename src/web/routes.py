@@ -1,13 +1,14 @@
 import uuid
 import json
 import time
-import os
+import re
 import asyncio
 from typing import Optional, List, Any, Dict
 
 from fastapi import APIRouter, Request, Response
 
 from dataclasses import asdict
+
 from src.agent.plan_models import PlanRun, PlanStep
 
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -33,6 +34,31 @@ templates = Jinja2Templates(directory="src/web/templates")
 
 
 SESSION_COOKIE_NAME = "chat_session_id"
+
+_PLAN_TEXT_PATTERNS = [
+    r"\bplan\b",
+    r"\bplan\s+propuest[oa]\b",
+    r"\bpropuest[oa]\s+de\s+plan\b",
+    r"\bpaso(s)?\b",
+    r"\bpaso\s+\d+\b",
+    r"\bstep(s)?\b",
+    r"\bpropuest[oa]\b",
+    r"\brun(ning)?\b",
+    r"\baction\b",
+]
+
+_CONFIRMATION_TEXT_PATTERNS = [
+    r"\bconfirmo\b",
+    r"\bconfirma(r|ción)?\b",
+    r"\bcancela(r|do|ción)?\b",
+    r"\bpara\s+ejecutar\b",
+    r"\bpara\s+descartar\b",
+    r"\b(responde|di|escribe)\b.*\b(confirmo|confirma|confirm)\b",
+    r"\b(responde|di|escribe)\b.*\b(cancela|cancelar|cancel)\b",
+    r"\b(reply|type)\b.*\bconfirm\b",
+    r"\b(reply|type)\b.*\bcancel\b",
+]
+
 
 MCP_REQUEST_TOOL = {
     "type": "function",
@@ -158,6 +184,56 @@ def index(request: Request, response: Response):
 
 # ---------------- Helpers ----------------
 
+def _looks_like_plan_text(text: str) -> bool:
+    """
+    Detecta cuando el MODELO escribió un 'plan' en texto (anti-plan-fantasma).
+    No intenta inferir intención del usuario.
+    """
+    if not text:
+        return False
+
+    t = text.lower()
+    hits = 0
+    for pat in _PLAN_TEXT_PATTERNS:
+        if re.search(pat, t):
+            hits += 1
+            if hits >= 2:
+                return True
+    return False
+
+
+
+def _looks_like_confirmation_prompt(text: str) -> bool:
+    """
+    Detecta cuando el MODELO pide confirmación en texto.
+    Debe usarse SIEMPRE junto con verificación de pending_run_id.
+    """
+    if not text:
+        return False
+    t = text.lower()
+    return any(re.search(p, t) for p in _CONFIRMATION_TEXT_PATTERNS)
+
+
+
+
+def _extract_command(text: str) -> Optional[str]:
+    # simple: "ejecuta el comando ipconfig" / "ejecuta ipconfig"
+    m = re.search(r"(?:ejecuta(?:me)?(?:\s+el)?\s+comando\s+|ejecuta\s+)(.+)$", (text or "").strip(), re.I)
+    if not m:
+        return None
+    cmd = m.group(1).strip().strip("`")
+    return cmd if cmd else None
+
+def _pick_command_mcp_id(tools_ctx: list[dict]) -> Optional[str]:
+    # tools_ctx: lista de MCPs del proyecto con endpoints
+    for m in tools_ctx:
+        mcp_id = m.get("id") or m.get("mcp_id")
+        for ep in (m.get("endpoints") or []):
+            if (ep.get("method") or "").upper() == "POST" and (ep.get("path") or "") == "/command":
+                return mcp_id
+    return None
+
+
 def _mcp_to_out(m) -> dict:
     return {
         "id": m.id,
@@ -222,13 +298,24 @@ async def _start_run_from_draft(run_id: str, request: Request) -> JSONResponse |
         return JSONResponse({"error": "Run not found"}, status_code=404)
 
     # Acepta draft o queued:
-    # - draft: flujo viejo (sin CAS)
-    # - queued: flujo nuevo (confirmación ganó CAS y ya marcó queued)
+    # - draft: aún no arrancó (puede haber llegado sin CAS previo)
+    # - queued: confirmación ya ganó CAS y quedó listo para arrancar
     if r.status not in ("draft", "queued"):
-        return JSONResponse({"error": f"Run no está listo para iniciar (status={r.status})"}, status_code=409)
+        return JSONResponse(
+            {"error": f"Run no está listo para iniciar (status={r.status})"},
+            status_code=409,
+        )
 
     plan_dict = r.plan
     if not isinstance(plan_dict, dict):
+        # LOG FUERTE para depuración (no asumir)
+        log.info(
+            "event=run.start.missing_plan run_id=%s chat_id=%s status=%s last_event=%s",
+            run_id,
+            r.chat_id,
+            r.status,
+            getattr(r, "last_event", None),
+        )
         return JSONResponse({"error": "Run draft sin plan"}, status_code=500)
 
     def step_from_dict(d: dict) -> PlanStep:
@@ -261,19 +348,54 @@ async def _start_run_from_draft(run_id: str, request: Request) -> JSONResponse |
     chat = store.get_chat(r.chat_id)
     proj = store.get_project(chat.project_id) if chat else None
 
-    # Si aún estaba draft, pásalo a queued. Si ya estaba queued, solo actualiza evento.
+    # -------------------------------------------------
+    # Arranque idempotente: si estaba draft, gana CAS aquí
+    # -------------------------------------------------
     if r.status == "draft":
-        plan_run_store.update(run_id, status="queued", last_event="run_start_queued")
+        ok = False
+        try:
+            ok = plan_run_store.try_mark_queued(run_id)
+        except Exception as e:
+            log.info(
+                "event=plan.try_mark_queued.error run_id=%s err=%s msg=%s",
+                run_id,
+                type(e).__name__,
+                e,
+            )
+
+        if not ok:
+            # Otro request pudo haber ganado o el run cambió de estado
+            rr = None
+            try:
+                rr = plan_run_store.get(run_id)
+            except Exception:
+                pass
+            st = rr.status if rr else "unknown"
+            return JSONResponse(
+                {"error": f"Run ya no está en draft (status={st})"},
+                status_code=409,
+            )
+
+        # Marcamos evento de arranque (sin cambiar status, ya está queued)
+        plan_run_store.update(run_id, last_event="run_start_queued")
+
     else:
+        # ya estaba queued
         plan_run_store.update(run_id, last_event="run_start_queued")
 
     store.add_message(r.chat_id, "assistant", f"Confirmado. Ejecutando plan… (run_id={run_id})")
 
-    # Limpia pending y marca active
+    # Limpia pending y marca active (persistido via state_repo)
     try:
         store.set_state(r.chat_id, pending_run_id=None, active_run_id=run_id)
-    except Exception:
-        pass
+    except Exception as e:
+        log.info(
+            "event=chat.state.set_active.error run_id=%s chat_id=%s err=%s msg=%s",
+            run_id,
+            r.chat_id,
+            type(e).__name__,
+            e,
+        )
 
     task = asyncio.create_task(
         run_plan_in_background(
@@ -285,51 +407,31 @@ async def _start_run_from_draft(run_id: str, request: Request) -> JSONResponse |
             proj=proj,
             trace_id=trace_id,
             log=log,
-            run_store=plan_run_store,
+            run_store=plan_run_store,  # SqlitePlanRunStore
             client=client,
         )
     )
 
+    # -------------------------------------------------
+    # IMPORTANTE:
+    # - NO limpiar estado aquí (evita duplicación con run_plan_in_background.finally)
+    # - Solo loguear errores del task
+    # -------------------------------------------------
     def _on_done(t: asyncio.Task):
         try:
             t.result()
         except Exception as e:
-            log.exception(f"event=plan.bg.task_error run_id={run_id} err={type(e).__name__}: {e}")
-        finally:
-            # Persistir estado final para idempotencia en confirmaciones tardías/duplicadas
-            try:
-                rr = plan_run_store.get(run_id)
-                final_status = rr.status if rr else "unknown"
-            except Exception:
-                final_status = "unknown"
-
-            # IMPORTANTE: no borrar pending_run_id si ya existe un draft nuevo.
-            # Solo limpiar active/pending si siguen apuntando a ESTE run_id.
-            try:
-                st = store.get_state(r.chat_id) or {}
-
-                updates = {
-                    "last_run_id": run_id,
-                    "last_run_status": final_status,
-                    "last_run_ts": int(time.time() * 1000),
-                }
-
-                # Solo limpia active_run_id si ESTE run sigue siendo el activo
-                if st.get("active_run_id") == run_id:
-                    updates["active_run_id"] = None
-
-                # Solo limpia pending_run_id si pending era ESTE run (normalmente ya es None)
-                if st.get("pending_run_id") == run_id:
-                    updates["pending_run_id"] = None
-
-                store.set_state(r.chat_id, **updates)
-            except Exception:
-                pass
-
+            log.exception(
+                "event=plan.bg.task_error run_id=%s err=%s msg=%s",
+                run_id,
+                type(e).__name__,
+                e,
+            )
 
     task.add_done_callback(_on_done)
 
     return {"ok": True, "run_id": run_id, "status": "queued"}
+
 
 
 
@@ -549,6 +651,46 @@ async def api_send(payload: SendMessageIn, request: Request):
     # -------------------------------------------------
     store.add_message(chat_id, "user", text)
 
+    cmd = _extract_command(text)
+    if cmd:
+        proj = store.get_project(c.project_id)
+        tools_ctx = _build_tools_ctx_for_project(proj) if proj else []
+        mcp_id_cmd = _pick_command_mcp_id(tools_ctx)
+
+        if not mcp_id_cmd:
+            reply = "No tengo un MCP activo con endpoint POST /command para este proyecto."
+            store.add_message(chat_id, "assistant", reply)
+            store.chat_preview_title(chat_id)
+            return {"reply": reply}
+
+        # crea plan draft sin LLM
+        method = "POST"
+        path = "/command"
+        body = {"cmd": cmd}
+
+        goal = f"{method} {path}"
+        step = PlanStep(title=goal, type="mcp_call", mcp_id=mcp_id_cmd, method=method, path=path, query=None, body=body)
+        plan = PlanRun(goal=goal, steps=[step])
+
+        run = plan_run_store.create(chat_id=chat_id, plan_id=plan.id, goal=plan.goal)
+        plan_run_store.update(run.run_id, status="draft", plan=asdict(plan), last_event="plan_draft")
+
+        store.set_state(chat_id, pending_run_id=run.run_id)
+
+        reply = (
+            f"📌 **Plan propuesto**\n"
+            f"- MCP: `{mcp_id_cmd}`\n"
+            f"- Acción: `{method} {path}`\n\n"
+            f"Comando: `{cmd}`\n\n"
+            f"Responde **confirmo** para ejecutarlo o **cancela** para descartarlo."
+        )
+
+        store.add_message(chat_id, "assistant", reply)
+        store.chat_preview_title(chat_id)
+        log.info(f"event=plan.draft.fastpath chat_id={chat_id} run_id={run.run_id} cmd={cmd}")
+
+        return {"run_id": run.run_id, "status": "draft", "reply": reply}
+
     # -------------------------------------------------
     # 2) Confirmación / Cancelación
     # -------------------------------------------------
@@ -563,7 +705,8 @@ async def api_send(payload: SendMessageIn, request: Request):
     # -------------------------------------------------
     # Guard robusto: confirmaciones fuera de timing
     # -------------------------------------------------
-    if (is_confirm or is_cancel) and not pending_run_id:
+    if (is_confirm or is_cancel) and pending_run_id is None:
+
         # 1) Si hay un run activo
         if active_run_id:
             reply = f"Ese plan ya fue confirmado y está en ejecución (run_id={active_run_id})."
@@ -583,7 +726,7 @@ async def api_send(payload: SendMessageIn, request: Request):
         if recovered_run_id and is_confirm:
             log.info(f"event=plan.draft.recovered chat_id={chat_id} run_id={recovered_run_id}")
 
-            # ✅ FIX 1: CAS ANTES de tocar state (evita dejar pending sucio)
+            # FIX 1: CAS ANTES de tocar state (evita dejar pending sucio)
             ok = False
             try:
                 ok = plan_run_store.try_mark_queued(recovered_run_id)
@@ -609,9 +752,9 @@ async def api_send(payload: SendMessageIn, request: Request):
                 )
                 return {"reply": reply, "run_id": recovered_run_id, "status": st or "unknown"}
 
-            # ✅ Solo si ganaste CAS, actualiza state y arranca
+            # Solo si ganaste CAS, actualiza state y arranca
             try:
-                store.set_state(chat_id, pending_run_id=recovered_run_id)
+                store.set_state(chat_id, pending_run_id=None, active_run_id=recovered_run_id)
             except Exception as e:
                 log.info(f"event=chat.state.set_pending.error err={type(e).__name__}")
 
@@ -650,10 +793,10 @@ async def api_send(payload: SendMessageIn, request: Request):
     # -------------------------------------------------
     # Confirmación normal: hay pending_run_id
     # -------------------------------------------------
-    if pending_run_id:
+    if pending_run_id is not None:
         log.info(f"event=send.confirmation.detected chat_id={chat_id} pending_run_id={pending_run_id} user_text={t}")
 
-        # ✅ FIX 2: si pending apunta a run inexistente, limpiar y responder claro
+        # FIX 2: si pending apunta a run inexistente, limpiar y responder claro
         try:
             pr = plan_run_store.get(pending_run_id)
         except Exception:
@@ -661,7 +804,8 @@ async def api_send(payload: SendMessageIn, request: Request):
 
         if not pr:
             try:
-                store.set_state(chat_id, pending_run_id=None)
+                store.set_state(chat_id, pending_run_id=None, active_run_id=None)
+
             except Exception:
                 pass
             reply = (
@@ -700,14 +844,23 @@ async def api_send(payload: SendMessageIn, request: Request):
                 return {"reply": reply, "run_id": pending_run_id, "status": st or "unknown"}
 
             log.info(f"event=send.confirmation.accept chat_id={chat_id} run_id={pending_run_id}")
+
+            store.set_state(
+                chat_id,
+                pending_run_id=None,
+                active_run_id=pending_run_id,
+            )
+
             res = await _start_run_from_draft(pending_run_id, request)
+
             log.info(f"event=send.confirmation.accept.done chat_id={chat_id} run_id={pending_run_id}")
             return res
 
         if is_cancel:
             log.info(f"event=send.confirmation.cancel chat_id={chat_id} run_id={pending_run_id}")
             try:
-                store.set_state(chat_id, pending_run_id=None)
+                store.set_state(chat_id, pending_run_id=None, active_run_id=None)
+
             except Exception as e:
                 log.info(f"event=chat.state.clear_pending.error err={type(e).__name__}")
 
@@ -804,13 +957,81 @@ async def api_send(payload: SendMessageIn, request: Request):
     # -----------------------------------------
     # RESPUESTA NORMAL
     # -----------------------------------------
+    
     if not tool_calls:
-        log.info("event=decision mode=respond")
-        reply = (content or "").strip() or "(sin respuesta)"
-        store.add_message(chat_id, "assistant", reply)
-        store.chat_preview_title(chat_id)
-        log.info(f"event=send.done duration_ms={int((time.time()-t_total)*1000)} mode=respond")
-        return {"reply": reply}
+        # Anti-plan-fantasma: si el modelo escribió un plan en texto, reintenta forzando tool-call.
+        if _looks_like_plan_text(content or ""):
+            log.info("event=respond.plan_text_detected retry=force_tool_choice")
+
+            try:
+                msg2 = client.chat(
+                    llm_messages,
+                    tools=[MCP_REQUEST_TOOL],
+                    tool_choice={"type": "function", "function": {"name": "mcp_request"}},
+                    temperature=0,
+                    mode="message",
+                )
+            except Exception as e:
+                log.info(f"event=llm.force_tool_call.error err={type(e).__name__}")
+                reply = "No pude generar una acción ejecutable. Repite la petición."
+                store.add_message(chat_id, "assistant", reply)
+                store.chat_preview_title(chat_id)
+                return {"reply": reply}
+
+            tool_calls2 = msg2.get("tool_calls")
+            content2 = msg2.get("content")
+
+            log.info(
+                "event=llm.force_tool_call.response "
+                f"has_tool_calls={bool(tool_calls2)} content_len={len(content2 or '')}"
+            )
+
+            if tool_calls2:
+                # Ahora sí hay tool_call → seguimos flujo normal
+                msg = msg2
+                tool_calls = tool_calls2
+                content = content2
+            else:
+                reply = (
+                    "Para ejecutar esa acción necesito generar un plan ejecutable, "
+                    "pero no pude estructurarlo. Intenta de nuevo."
+                )
+                store.add_message(chat_id, "assistant", reply)
+                store.chat_preview_title(chat_id)
+                return {"reply": reply}
+
+        #Guard final: si sigue sin tool_calls y el modelo pide confirmación, bloquear si no hay pending real.
+        if (not tool_calls) and _looks_like_confirmation_prompt(content or ""):
+            try:
+                st2 = store.get_state(chat_id) or {}
+            except Exception:
+                st2 = {}
+
+            if st2.get("pending_run_id") is None:
+                log.info(
+                    "event=respond.confirmation_text_without_pending blocked=1 "
+                    f"content_preview={(content or '')[:160]}"
+                )
+                reply = (
+                    "Puedo ejecutar eso, pero no pude generar un plan ejecutable. "
+                    "Repite la petición con un poco más de detalle."
+                )
+                store.add_message(chat_id, "assistant", reply)
+                store.chat_preview_title(chat_id)
+                return {"reply": reply}
+
+        # Respuesta normal
+        if not tool_calls:
+            reply = (content or "").strip() or "(sin respuesta)"
+            store.add_message(chat_id, "assistant", reply)
+            store.chat_preview_title(chat_id)
+            return {"reply": reply}
+
+    # Si llegamos aquí, hay tool_calls y continúa: TOOL CALL → PLAN DRAFT
+
+
+
+    # (si no entró al retry, sigues con respond normal)
 
     # -----------------------------------------
     # TOOL CALL → PLAN DRAFT

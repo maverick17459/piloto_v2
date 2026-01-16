@@ -5,7 +5,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Any, Dict, Optional, List
 
 
@@ -63,6 +63,9 @@ class SqliteChatStateRepo:
             c.commit()
 
     def get_state(self, chat_id: str) -> Dict[str, Any]:
+        """
+        Devuelve SOLO keys con valor != None para evitar confusiones de guard.
+        """
         with self._lock, self._conn() as c:
             row = c.execute(
                 "SELECT * FROM chat_state WHERE chat_id = ?",
@@ -76,7 +79,7 @@ class SqliteChatStateRepo:
             data.pop("chat_id", None)
             data.pop("updated_ts", None)
 
-            # elimina None
+            # ✅ evita pending_run_id=None "fantasma"
             return {k: v for k, v in data.items() if v is not None}
 
     def set_state(self, chat_id: str, **kwargs: Any) -> None:
@@ -241,6 +244,34 @@ class SqlitePlanRunStore:
             ).fetchone()
 
             return row["run_id"] if row else None
+
+    # ✅ usado por routes.py (recovery)
+    def list_all(self) -> List[PlanRunState]:
+        with self._lock, self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM plan_runs ORDER BY updated_ts DESC"
+            ).fetchall()
+            return [self._row_to_state(r) for r in rows]
+
+    # (opcional, útil para debug)
+    def list_by_chat(self, chat_id: str, limit: int = 50) -> List[PlanRunState]:
+        with self._lock, self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT * FROM plan_runs
+                WHERE chat_id = ?
+                ORDER BY updated_ts DESC
+                LIMIT ?
+                """,
+                (chat_id, int(limit)),
+            ).fetchall()
+            return [self._row_to_state(r) for r in rows]
+
+    # ✅ usado por routes.py (GET /api/runs/{id})
+    def to_dict(self, r: PlanRunState) -> Dict[str, Any]:
+        d = asdict(r)
+        # limpieza opcional: no devolver None para UI
+        return {k: v for k, v in d.items() if v is not None}
 
     # ---------------- Update ----------------
 
